@@ -4431,6 +4431,17 @@ bool Gfx_PickupItemAnimate(u8 itemId) // 0x80054AD8
     GsCOORD2PARAM* transform;
 
 #ifdef SH_PC_PORT
+    /* VR world pickups (vr_interact.c Pc_VrPickupsInWorld): no take screen -
+     * no frozen frame, no item model spun up in front of it, which Full VR
+     * blew up to the whole field of view. The question shows at once, over
+     * the live world, as in events_util.c Event_ItemTake. Covers every
+     * special pickup (keys, medallions, the pipe, the shotgun...). */
+    {
+        extern int Pc_VrPickupsInWorld(void);
+        if (Pc_VrPickupsInWorld())
+            return true;
+    }
+
     /* Isolate the pickup model so its own front faces occlude its back faces
      * (the inventory see-through fix needs OT0 to hold the item ALONE). Pause
      * the world render — BgmStatusFlag_Pause gates the whole world/player/NPC

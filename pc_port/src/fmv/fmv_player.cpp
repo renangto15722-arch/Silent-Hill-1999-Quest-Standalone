@@ -9,6 +9,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+
+/* VR frame push (pc_port/src/vr_openvr.c) - C linkage */
+extern "C" void VrOvr_EndFrameFmv(void);
 #endif
 
 #include "fmv_player.h"
@@ -418,6 +421,11 @@ static void DrawVideoFrameEx(const unsigned char* pixels, int image_w, int image
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     RestoreGLState(&saved);
+
+    /* VR: the FMV player runs its own present loop, bypassing
+     * PsyX_EndScene - push the finished frame to the HMD here too, or
+     * videos are invisible in the headset. */
+    VrOvr_EndFrameFmv();
 
     /* FMV presents its own frames outside the normal render loop, but it must
      * present through GR_SwapWindow like every other frame: that is where the

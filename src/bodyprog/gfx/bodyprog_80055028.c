@@ -55,6 +55,9 @@ static s16 Pc_OverlayQuadHalfW(void)
 #include "hires_override.h"
 #include "pc_wide_lm.h"
 
+extern int g_PcSkipMeshPrims;
+
+
 /* Called above their definitions. Without a prototype in scope Clang
  * synthesises `int f()` at the call site and then rejects the real
  * definition as a conflicting type; GCC only warns. */
@@ -2279,6 +2282,9 @@ void func_80057344(s_ModelInfo* modelInfo, GsOT_TAG* otTag, bool arg2, MATRIX* m
 
         func_80057B7C(curMeshHdr, vertOffset, scratchData, mat);
 
+#ifdef SH_PC_PORT
+        if (!g_PcSkipMeshPrims) /* Hands Only (bodyprog_bone_80044F14.c) */
+#endif
         Gfx_MeshDraw(curMeshHdr, scratchData, otTag, arg2);
     }
 
@@ -2846,7 +2852,7 @@ void Gfx_MeshDraw(s_MeshHeader* meshHdr, s_GteScratchData* scratchData, GsOT_TAG
                     }
 
 #ifdef SH_PC_PORT
-                    if (SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
+                    if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
                     {
                         /* Far poly: integer NCLIP collapses sub-pixel-tall distant
                          * ground to zero area and culls it. Re-test on the PGXP
@@ -2910,6 +2916,13 @@ void Gfx_MeshDraw(s_MeshHeader* meshHdr, s_GteScratchData* scratchData, GsOT_TAG
                         *(s32*)&poly1->x3  = temp_v1_5;
 #ifdef SH_PC_PORT
                         SH_PGXP_PROP4(scratchData, poly3,
+                            scratchData->field_380.s_0.field_10, scratchData->field_380.s_0.field_11,
+                            scratchData->field_380.s_0.field_12, scratchData->field_380.s_0.field_13);
+                        /* The face's fog layer (poly1) sits on the same four vertices: it
+                         * takes the same precise projection and view depth, or it stays on
+                         * the integer PSX grid while the face under it does not, and their
+                         * edges part and sparkle as the camera moves. */
+                        SH_PGXP_PROP4(scratchData, poly1,
                             scratchData->field_380.s_0.field_10, scratchData->field_380.s_0.field_11,
                             scratchData->field_380.s_0.field_12, scratchData->field_380.s_0.field_13);
 #endif
@@ -3096,7 +3109,7 @@ void Gfx_MeshDraw(s_MeshHeader* meshHdr, s_GteScratchData* scratchData, GsOT_TAG
                 }
 
 #ifdef SH_PC_PORT
-                if (SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
+                if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
                 {
                     /* Far poly: precise backface re-test (see loop A). */
                     s32 _n012 = 0, _n312 = 0;
@@ -3267,7 +3280,7 @@ void Gfx_MeshDraw(s_MeshHeader* meshHdr, s_GteScratchData* scratchData, GsOT_TAG
             }
 
 #ifdef SH_PC_PORT
-            if (SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
+            if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
             {
                 /* Far poly: precise backface re-test (see loop A). */
                 s32 _n012 = 0, _n312 = 0;
@@ -3333,6 +3346,10 @@ void Gfx_MeshDraw(s_MeshHeader* meshHdr, s_GteScratchData* scratchData, GsOT_TAG
                 *(s32*)&poly2->x3 = temp_v1_21;
 #ifdef SH_PC_PORT
                 SH_PGXP_PROP4(scratchData, poly3,
+                    scratchData->field_380.s_0.field_10, scratchData->field_380.s_0.field_11,
+                    scratchData->field_380.s_0.field_12, scratchData->field_380.s_0.field_13);
+                /* the fog layer over the face: same vertices, same projection */
+                SH_PGXP_PROP4(scratchData, poly2,
                     scratchData->field_380.s_0.field_10, scratchData->field_380.s_0.field_11,
                     scratchData->field_380.s_0.field_12, scratchData->field_380.s_0.field_13);
 #endif
@@ -3532,7 +3549,7 @@ __block1530:
         }
 
 #ifdef SH_PC_PORT
-        if (SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
+        if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
         {
             /* Far poly: precise backface re-test (see loop A). */
             s32 _n012 = 0, _n312 = 0;
@@ -3765,7 +3782,7 @@ __block19CC:
 #endif
 
 #ifdef SH_PC_PORT
-        if (SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
+        if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(scratchData->field_380.s_0.field_18, arg3))
         {
             /* Far poly: precise backface re-test (see loop A). */
             s32 _n012 = 0, _n312 = 0;
@@ -3875,6 +3892,9 @@ void func_80059D50(s32 arg0, s_ModelInfo* modelInfo, MATRIX* mat, bool arg3, GsO
     {
         func_800574D4(curMeshHdr, scratchData);
         func_80057B7C(curMeshHdr, 0, scratchData, mat);
+#ifdef SH_PC_PORT
+        if (!g_PcSkipMeshPrims) /* Hands Only (bodyprog_bone_80044F14.c) */
+#endif
         func_80059E34(arg0, curMeshHdr, scratchData, arg3, tag);
     }
 }
@@ -3975,7 +3995,7 @@ void func_80059E34(u32 arg0, s_MeshHeader* meshHdr, s_GteScratchData* scratchDat
         SH_CLAMP_OT_DEPTH(var_t2, arg3);
 
 #ifdef SH_PC_PORT
-        if (SH_WHOLEMAP_FAR_POLY(var_t2, arg3))
+        if (g_PsxUsePgxp || SH_WHOLEMAP_FAR_POLY(var_t2, arg3))
         {
             /* Far poly: precise backface re-test (see Gfx_MeshDraw loop A). */
             s32 _n012 = 0, _n312 = 0;
@@ -4154,6 +4174,9 @@ void func_8005A21C(s_ModelInfo* modelInfo, GsOT_TAG* otTag, bool arg2, MATRIX* m
             func_8005AA08(curMeshHdr, normalOffset, (s_GteScratchData2*)scratchData);
         }
 
+#ifdef SH_PC_PORT
+        if (!g_PcSkipMeshPrims) /* Hands Only (bodyprog_bone_80044F14.c) */
+#endif
         func_8005AC50(curMeshHdr, (s_GteScratchData2*)scratchData, otTag, (s32)(intptr_t)arg2);
     }
 }
@@ -5360,12 +5383,39 @@ void Gfx_BillboardDraw(s32 arg0, q19_12 posX, q19_12 posY, q19_12 posZ, GsOT* ot
                 }
                 poly_gt4->pad2 = poly_gt4->p1; /* v0 fog (uniform billboard) */
 
-                /* PGXP: billboard corners are built in screen space from the one
-                 * projected centre (field_1C) — the 4th vertex IS that centre, so
-                 * with PGXP it alone matches the ring (centre W) while the other
-                 * corners go affine, warping the quad ("tree-foliage spikes").
-                 * Billboards are camera-facing flat quads, so affine is correct. */
-                PsyX_SetNextPrimAffine();
+                /* Billboard corners are built in screen space from the one
+                 * projected base point (field_1C). Integer corners put every tree
+                 * and bush on the PSX pixel grid, so it jumped a whole pixel at a
+                 * time as the camera moved - in VR about 9 px in the eye. Built
+                 * natively from the base point's precise projection instead, with
+                 * the size from its true depth, and all four corners carry that one
+                 * depth: a flat constant-W quad (the old mixed-W warp, "tree-foliage
+                 * spikes", cannot happen) at sub-pixel position, whose eye shift
+                 * in VR uses its real depth. Without a precise point (PGXP off)
+                 * the corners still take its view depth, and the quad stays affine. */
+                {
+                    extern int  PsyX_PrecisePoint(const void* addr, float* x, float* y, float* w);
+                    extern void PsyX_PreciseCornerFrom(void* dst, const void* point, float x, float y);
+                    float px, py, pw, hh = 0.0f, hw = 0.0f;
+                    const int precise = PsyX_PrecisePoint(&field_1C, &px, &py, &pw);
+
+                    if (precise)
+                    {
+                        hh = (float)curPtr->field_8 * (float)sp498 / pw;
+                        hw = (float)curPtr->field_6 * (float)sp498 / pw;
+                    }
+                    else
+                    {
+                        px = (float)field_1C.vx;
+                        py = (float)field_1C.vy;
+                    }
+                    PsyX_PreciseCornerFrom(&poly_gt4->x0, &field_1C, px, py - hh * 2.0f);
+                    PsyX_PreciseCornerFrom(&poly_gt4->x1, &field_1C, px + hw, py - hh);
+                    PsyX_PreciseCornerFrom(&poly_gt4->x2, &field_1C, px - hw, py - hh);
+                    PsyX_PreciseCornerFrom(&poly_gt4->x3, &field_1C, px, py);
+                    if (!precise)
+                        PsyX_SetNextPrimAffine();
+                }
                 addPrim(&ot_arg4->org[MIN(temp_v0_2 >> arg5, ORDERING_TABLE_SIZE - 1)], poly_gt4);
                 poly_gt4++;
             }

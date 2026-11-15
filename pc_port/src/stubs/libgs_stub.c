@@ -487,6 +487,32 @@ extern int g_PsxUsePgxp;
         Shadow_Copy(&(pl)->x2, &(a2)); \
         Shadow_Copy(&(pl)->x3, &(a3)); \
     } } while (0)
+
+/* Back-face test on the PGXP-precise projection (PsyX_GPU.cpp
+ * PsyX_PGXP_TriBackface, keyed by the same stack temporaries RotTransPers3
+ * shadow-stored), the item-path twin of the scenery's. The integer NormalClip
+ * gives zero area to any face under a PSX pixel and the drawers drop it: a
+ * close-up model seen small - a VR weapon in the hand (vr_weapon_hd.c), where
+ * the PSX screen spans ~140 degrees - kept only its few biggest faces. Without
+ * PGXP, or for a vertex it does not hold, it is the integer test as before. */
+extern int PsyX_PGXP_TriBackface(const void* a0, const void* a1, const void* a2, int intNcl);
+
+/* World depth for a TMD drawn among the world (vr_weapon_hd.c sets this
+ * around its GsSortObject4J). The drawers bucket by `p`, the depth-cue IR0,
+ * calibrated (SetDQA/DQB in GsSortObject4J) for an item alone on screen at the
+ * close-up distance. A weapon a few centimetres from the eye saturates it, so
+ * every face fell into the farthest bucket and the world was painted over it:
+ * the model was sorted, drawn, and never seen. Here the bucket is the world
+ * drawers' own: mean screen Z of the face >> (shift + 2) (bodyprog_80055028.c
+ * func_8005AC50), from the SZ mirror RotTransPers* fill (SZ1..3 = the last
+ * three vertices projected). */
+int g_PcTmdWorldDepth = 0;
+#define TMD_WORLD_OTZ(otz, sh) do { \
+    if (g_PcTmdWorldDepth) \
+        (otz) = (((int)g_PsyX_RtpSz[1] + (int)g_PsyX_RtpSz[2] + (int)g_PsyX_RtpSz[3]) / 3) >> ((sh) + 2); \
+    } while (0)
+#define TMD_BACKFACE(a0, a1, a2, ncl) \
+    (g_PsxUsePgxp ? PsyX_PGXP_TriBackface(&(a0), &(a1), &(a2), (int)(ncl)) : ((ncl) <= 0))
  
 /* Every emitter below carries the TMD mode byte's ABE bit (`cd` bit 1) into the
  * output packet, because setPoly*() writes the OPAQUE base code and PsyCross
@@ -512,8 +538,8 @@ void GsTMDfastF3LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift, 
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        otz = p >> shift;
-        if (nclip <= 0) continue;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
 
         col_in.r = prim->r0; col_in.g = prim->g0; col_in.b = prim->b0; col_in.cd = prim->code;
         NormalColorCol(&nrm[prim->n0], &col_in, &col_out);
@@ -549,13 +575,13 @@ void GsTMDfastG3LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift, 
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         col_in.r = prim->r0; col_in.g = prim->g0; col_in.b = prim->b0; col_in.cd = prim->code;
         NormalColorCol3(&nrm[prim->n0], &nrm[prim->n1], &nrm[prim->n2],
                         &col_in, &c0, &c1, &c2);
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -590,12 +616,12 @@ void GsTMDfastF4LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift, 
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         col_in.r = prim->r0; col_in.g = prim->g0; col_in.b = prim->b0; col_in.cd = prim->code;
         NormalColorCol(&nrm[prim->n0], &col_in, &col_out);
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -629,13 +655,13 @@ void GsTMDfastG4LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift, 
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         col_in.r = prim->r0; col_in.g = prim->g0; col_in.b = prim->b0; col_in.cd = prim->code;
         NormalColorCol3(&nrm[prim->n0], &nrm[prim->n1], &nrm[prim->n2],
                         &col_in, &c0, &c1, &c2);
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -672,14 +698,14 @@ void GsTMDfastTF3LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift,
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         /* Textured prims have no base color; use neutral 0x80 (half-bright
          * so NormalColorCol output stays in-range after lighting). */
         col_in.r = 0x80; col_in.g = 0x80; col_in.b = 0x80; col_in.cd = prim->cd;
         NormalColorCol(&nrm[prim->n0], &col_in, &col_out);
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -714,13 +740,13 @@ void GsTMDfastTG3LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift,
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         col_in.r = 0x80; col_in.g = 0x80; col_in.b = 0x80; col_in.cd = prim->cd;
         NormalColorCol3(&nrm[prim->n0], &nrm[prim->n1], &nrm[prim->n2],
                         &col_in, &c0, &c1, &c2);
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -761,12 +787,12 @@ void GsTMDfastTF4LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift,
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
 
         col_in.r = 0x80; col_in.g = 0x80; col_in.b = 0x80; col_in.cd = prim->cd;
         NormalColorCol(&nrm[prim->n0], &col_in, &col_out);
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -804,13 +830,13 @@ void GsTMDfastTG4LFG(void* op, VERT* vp, VERT* np, PACKET* pk, int n, int shift,
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
         col_in.r = 0x80; col_in.g = 0x80; col_in.b = 0x80; col_in.cd = prim->cd;
         NormalColorCol3(&nrm[prim->n0], &nrm[prim->n1], &nrm[prim->n2],
                         &col_in, &c0, &c1, &c2);
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -848,9 +874,9 @@ void GsTMDfastNF3(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, un
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -893,9 +919,9 @@ void GsTMDfastNG3(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, un
             RotTransPers3(&vtx[gp->v0], &vtx[gp->v1], &vtx[gp->v2],
                           &sxy0, &sxy1, &sxy2, &p, &flg);
             nclip = NormalClip(sxy0, sxy1, sxy2);
-            if (nclip <= 0) continue;
+            if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
 
-            otz = p >> shift;
+            otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
             if (otz <= 0) continue;
             if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -918,9 +944,9 @@ void GsTMDfastNG3(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, un
         RotTransPers3(&vtx[prim->v0], &vtx[prim->v1], &vtx[prim->v2],
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -953,9 +979,9 @@ void GsTMDfastNF4(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, un
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -987,9 +1013,9 @@ void GsTMDfastNG4(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, un
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         RotTransPers(&vtx[prim->v3], (int*)&sxy3, &p, &flg);
         nclip = NormalClip(sxy0, sxy1, sxy2);
-        if (nclip <= 0) continue;
+        if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
  
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
  
@@ -1026,10 +1052,10 @@ void GsTMDfastNTF3(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, u
         /* FCE (flag bit 1): double-sided — skip back-face cull */
         if (!(prim->dummy & 2)) {
             nclip = NormalClip(sxy0, sxy1, sxy2);
-            if (nclip <= 0) continue;
+            if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
         }
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -1115,10 +1141,10 @@ void GsTMDfastNTG3(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, u
                       &sxy0, &sxy1, &sxy2, &p, &flg);
         if (!(prim->flag & 2)) {
             nclip = NormalClip(sxy0, sxy1, sxy2);
-            if (nclip <= 0) continue;
+            if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
         }
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -1157,10 +1183,10 @@ void GsTMDfastNTF4(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, u
                       &sxy0, &sxy1, &sxy2, &sxy3, &p, &flg);
         if (!(prim->dummy & 2)) {
             nclip = NormalClip(sxy0, sxy1, sxy2);
-            if (nclip <= 0) continue;
+            if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
         }
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 
@@ -1196,10 +1222,10 @@ void GsTMDfastNTG4(void* op, VERT* vp, PACKET* pk, int n, int shift, GsOT* ot, u
                       &sxy0, &sxy1, &sxy2, &sxy3, &p, &flg);
         if (!(prim->dummy & 2)) {
             nclip = NormalClip(sxy0, sxy1, sxy2);
-            if (nclip <= 0) continue;
+            if (TMD_BACKFACE(sxy0, sxy1, sxy2, nclip)) continue;
         }
 
-        otz = p >> shift;
+        otz = p >> shift; TMD_WORLD_OTZ(otz, shift);
         if (otz <= 0) continue;
         if (otz >= (1 << ot->length)) otz = (1 << ot->length) - 1;
 

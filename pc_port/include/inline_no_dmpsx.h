@@ -20,6 +20,7 @@ extern "C" {
 extern int  g_PsxUsePgxp;
 extern int  g_PsyX_UsePerPixelFlashlight;
 extern void PGXP_StoreAddr(void* addr, int slot);
+extern int  GR_NeedViewSpaceData(void);
 #ifdef __cplusplus
 }
 #endif
@@ -66,7 +67,7 @@ extern void PGXP_StoreAddr(void* addr, int slot);
 #define gte_stsxy3c( r0 ) do { \
     uint *_p = (uint*)((char*)(r0)); \
     _p[0] = MFC2(12); _p[1] = MFC2(13); _p[2] = MFC2(14); \
-    if (g_PsxUsePgxp || g_PsyX_UsePerPixelFlashlight) { PGXP_StoreAddr(&_p[0], 0); PGXP_StoreAddr(&_p[1], 1); PGXP_StoreAddr(&_p[2], 2); } \
+    if (GR_NeedViewSpaceData()) { PGXP_StoreAddr(&_p[0], 0); PGXP_StoreAddr(&_p[1], 1); PGXP_StoreAddr(&_p[2], 2); } \
 } while(0)
 
 /* gte_stsxy3_g3 - Store SXY0/SXY1/SXY2 (GTE C12-14) into the X/Y slots
@@ -98,7 +99,7 @@ extern void PGXP_StoreAddr(void* addr, int slot);
     *(uint*)(_b + 16) = MFC2(12); \
     *(uint*)(_b + 24) = MFC2(13); \
     *(uint*)(_b + 32) = MFC2(14); \
-    if (g_PsxUsePgxp || g_PsyX_UsePerPixelFlashlight) { PGXP_StoreAddr(_b + 16, 0); PGXP_StoreAddr(_b + 24, 1); PGXP_StoreAddr(_b + 32, 2); } \
+    if (GR_NeedViewSpaceData()) { PGXP_StoreAddr(_b + 16, 0); PGXP_StoreAddr(_b + 24, 1); PGXP_StoreAddr(_b + 32, 2); } \
 } while(0)
 #else
 #define gte_stsxy3_g3( p ) do { \

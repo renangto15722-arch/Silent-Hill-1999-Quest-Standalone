@@ -191,6 +191,38 @@ s_PcConfig g_PcConfig = {
     .worldVShift         = 0.0f,       /* the console anchor needs no correction */
     .cutsceneVShift      = 0.0f,       /* cutscenes frame via letterbox bars; neutral by default */
     .mouseSensitivity        = 1.0f,
+    .vrEnabled           = 1,    /* VR head tracking on */
+    .vrPositional        = 1,    /* full 6DOF (0 = rotation-only 3DOF) */
+    .vrRoomscale         = 1,    /* roomscale walking in Classic/FPS */
+    .vrScale             = 1.0f, /* world scale: >1 = the world looks bigger */
+    .vrRoomscaleScale    = 1.0f, /* roomscale step amplification */
+    .vrTrackCutscenes    = 1,    /* keep positional tracking in cutscenes */
+    .vrStereoDepth       = 0.032f, /* stereo half-IPD (meters) */
+    .vrStereoConv        = 0.0f,   /* stereo convergence (pixels) */
+    .vrGameViewMode      = 2,      /* gameplay defaults to Full VR */
+    .vrCutsceneViewMode  = 0,      /* in-engine cutscenes on the cinema screen (FMV always there too) */
+    .vrAutoScreen        = 1,
+    .vrHeadsetPreset     = 3,      /* Quest 3S (dev baseline) */
+    .vrFlattenPitch      = 1,
+    .vrScreenWidth       = 1.6f,   /* ~44 deg wide at 2 m */
+    .vrScreenDistance    = 2.0f,
+    .vrFovRollCover      = 10.0f,
+    .vrBodyTurnDeadzone  = 15.0f,
+    .vrSnapTurn          = 0,      /* smooth turning */
+    .vrUiScreenSize      = 100.0f, /* 60 deg wide 2D interface panel */
+    .vrEyeRes            = 100.0f, /* eye images at the window's resolution */
+    .vrWeaponSize        = 100.0f, /* weapons at the size of the models they replace */
+    /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
+    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f },
+    .vrMapScale          = 100.0f, /* the paper map at its own size */
+    .vrMoveDir           = 0,      /* walk where the body faces */
+    .vrHeadLock          = 0,
+    .vrHolsterOn         = 1,
+    .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
+    .vrPlayerHeight      = 0.0f,
+    .vrGrabRadius        = 0.35f,  /* m */
+    .vrWheelSize         = 100.0f,
+    .vrWheelOpacity      = 80.0f,
     .controllerSensitivity   = 1.0f,
 
     /* === CLASSIC scheme: tank controls + fixed PSX camera (the default). The
@@ -1196,6 +1228,202 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.immersiveFpsHeadTracking = (atoi(value) != 0);
         }
+        else if (strcmp(key, "vr_enabled") == 0)
+        {
+            g_PcConfig.vrEnabled = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_positional") == 0)
+        {
+            g_PcConfig.vrPositional = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_roomscale") == 0)
+        {
+            g_PcConfig.vrRoomscale = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_scale") == 0)
+        {
+            float v = (float)atof(value);
+            if (v < 0.25f) v = 0.25f;
+            if (v > 4.0f)  v = 4.0f;
+            g_PcConfig.vrScale = v;
+        }
+        else if (strcmp(key, "vr_roomscale_scale") == 0)
+        {
+            float v = (float)atof(value);
+            if (v < 0.25f) v = 0.25f;
+            if (v > 4.0f)  v = 4.0f;
+            g_PcConfig.vrRoomscaleScale = v;
+        }
+        else if (strcmp(key, "vr_track_cutscenes") == 0)
+        {
+            g_PcConfig.vrTrackCutscenes = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_stereo_depth") == 0)
+        {
+            float v = (float)atof(value);
+            if (v < 0.005f) v = 0.005f;
+            if (v > 0.15f)  v = 0.15f;
+            g_PcConfig.vrStereoDepth = v;
+        }
+        else if (strcmp(key, "vr_stereo_convergence") == 0)
+        {
+            float v = (float)atof(value);
+            if (v < -100.0f) v = -100.0f;
+            if (v >  100.0f) v =  100.0f;
+            g_PcConfig.vrStereoConv = v;
+        }
+        else if (strcmp(key, "vr_game_view_mode") == 0)
+        {
+            int v = atoi(value);
+            g_PcConfig.vrGameViewMode = (v < 0 || v > 2) ? 2 : v;
+        }
+        else if (strcmp(key, "vr_cutscene_view_mode") == 0)
+        {
+            int v = atoi(value);
+            /* 0 = 2D screen, 2 = Full VR; older saves: 1 (3D screen) -> 0, 3 (same as game) -> 2 */
+            g_PcConfig.vrCutsceneViewMode = (v == 0 || v == 1) ? 0 : 2;
+        }
+        else if (strcmp(key, "vr_auto_screen") == 0)
+        {
+            g_PcConfig.vrAutoScreen = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_screen_width") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrScreenWidth = (v < 0.5f) ? 0.5f : (v > 8.0f) ? 8.0f : v;
+        }
+        else if (strcmp(key, "vr_screen_distance") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrScreenDistance = (v < 0.5f) ? 0.5f : (v > 10.0f) ? 10.0f : v;
+        }
+        else if (strcmp(key, "vr_fov_roll_cover") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrFovRollCover = (v < 0.0f) ? 0.0f : (v > 30.0f) ? 30.0f : v;
+        }
+        else if (strcmp(key, "vr_head_lock") == 0)
+        {
+            g_PcConfig.vrHeadLock = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_player_height") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrPlayerHeight = (v < 1.0f) ? 0.0f : (v < 120.0f) ? 120.0f : (v > 220.0f) ? 220.0f : v;
+        }
+        else if (strcmp(key, "vr_holster") == 0)
+        {
+            g_PcConfig.vrHolsterOn = (atoi(value) != 0);
+        }
+        else if (strncmp(key, "vr_holster_", 11) == 0)
+        {
+            static const char* const names[6] = { "hip_l", "hip_r", "chest_l", "chest_r", "back_l", "back_r" };
+            int i, v = atoi(value);
+            for (i = 0; i < 6; i++)
+                if (strcmp(key + 11, names[i]) == 0)
+                    g_PcConfig.vrHolsterSlot[i] = (v < 0 || v > PCCFG_HOLSTER_MAP) ? 0 : v;
+        }
+        else if (strncmp(key, "vr_aim_", 7) == 0)
+        {
+            static const char* const names[5] = { "fwd", "up", "right", "pitch", "yaw" };
+            static const float       lim[5]   = { 30.0f, 30.0f, 30.0f, 45.0f, 45.0f };
+            int   i;
+            float v = (float)atof(value);
+            for (i = 0; i < 5; i++)
+                if (strcmp(key + 7, names[i]) == 0)
+                    g_PcConfig.vrAimOfs[i] = (v < -lim[i]) ? -lim[i] : (v > lim[i]) ? lim[i] : v;
+        }
+        else if (strncmp(key, "vr_map_", 7) == 0)
+        {
+            static const char* const names[6] = { "fwd", "up", "right", "pitch", "yaw", "roll" };
+            static const float       lim[6]   = { 30.0f, 30.0f, 30.0f, 90.0f, 90.0f, 180.0f };
+            int   i;
+            float v = (float)atof(value);
+            for (i = 0; i < 6; i++)
+                if (strcmp(key + 7, names[i]) == 0)
+                    g_PcConfig.vrMapOfs[i] = (v < -lim[i]) ? -lim[i] : (v > lim[i]) ? lim[i] : v;
+        }
+        else if (strncmp(key, "vr_grip_", 8) == 0)
+        {
+            const int w = PcConfig_GripSlot(atoi(key + 8));
+            float*    g;
+            if (w >= 0)
+            {
+                /* forward up right (cm), pitch yaw roll (deg), and since the VR
+                 * Objects page the model's scale (%) - older lines have six */
+                float sc = -1.0f;
+                int   n;
+                g = g_PcConfig.vrGrip[w];
+                n = sscanf(value, "%f %f %f %f %f %f %f", &g[0], &g[1], &g[2], &g[3], &g[4], &g[5], &sc);
+                if (n < 6)
+                    memset(g, 0, sizeof(g_PcConfig.vrGrip[w]));
+                if (n == 7)
+                    g_PcConfig.vrGripScale[w] = (sc < 50.0f) ? 50.0f : (sc > 200.0f) ? 200.0f : sc;
+            }
+        }
+        else if (strcmp(key, "vr_move_dir") == 0)
+        {
+            g_PcConfig.vrMoveDir = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_map_scale") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrMapScale = (v < 50.0f) ? 50.0f : (v > 200.0f) ? 200.0f : v;
+        }
+        else if (strcmp(key, "vr_grab_radius") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrGrabRadius = (v < 0.1f) ? 0.1f : (v > 1.5f) ? 1.5f : v;
+        }
+        else if (strcmp(key, "vr_wheel_size") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWheelSize = (v < 50.0f) ? 50.0f : (v > 200.0f) ? 200.0f : v;
+        }
+        else if (strcmp(key, "vr_wheel_opacity") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWheelOpacity = (v < 20.0f) ? 20.0f : (v > 100.0f) ? 100.0f : v;
+        }
+        else if (strcmp(key, "vr_ui_screen_size") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrUiScreenSize = (v < 50.0f) ? 50.0f : (v > 150.0f) ? 150.0f : v;
+        }
+        else if (strcmp(key, "vr_eye_res") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrEyeRes = (v < 100.0f) ? 100.0f : (v > 200.0f) ? 200.0f : v;
+        }
+        else if (strcmp(key, "pc_options_last_page") == 0)
+        {
+            g_PcConfig.pcOptionsLastPage = atoi(value);
+        }
+        else if (strcmp(key, "vr_weapon_size") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWeaponSize = (v < 50.0f) ? 50.0f : (v > 200.0f) ? 200.0f : v;
+        }
+        else if (strcmp(key, "vr_snap_turn") == 0)
+        {
+            /* 0 (smooth) or a multiple of 15 up to 90 */
+            int v = (atoi(value) + 7) / 15 * 15;
+            g_PcConfig.vrSnapTurn = (v < 0) ? 0 : (v > 90) ? 90 : v;
+        }
+        else if (strcmp(key, "vr_body_turn_deadzone") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrBodyTurnDeadzone = (v < 0.0f) ? 0.0f : (v > 90.0f) ? 90.0f : v;
+        }
+        else if (strcmp(key, "vr_headset_preset") == 0)
+        {
+            int v = atoi(value);
+            g_PcConfig.vrHeadsetPreset = (v < 0 || v > 6) ? 0 : v;
+        }
+        else if (strcmp(key, "vr_flatten_pitch") == 0)
+        {
+            g_PcConfig.vrFlattenPitch = (atoi(value) != 0);
+        }
         else if (strcmp(key, "control_2d") == 0)
         {
             g_PcConfig.control2d = (atoi(value) != 0);
@@ -1450,6 +1678,16 @@ else if (strcmp(key, "enable_plugins") == 0)
     }
 
     fclose(f);
+
+    /* Weapon scale became per weapon (VR Objects page): a weapon whose
+     * vr_grip_<id> line has no scale yet keeps the size the single
+     * vr_weapon_size gave every weapon. */
+    {
+        int w;
+        for (w = 0; w < 12; w++)
+            if (g_PcConfig.vrGripScale[w] < 0.0f)
+                g_PcConfig.vrGripScale[w] = g_PcConfig.vrWeaponSize;
+    }
 
     /* Configs from before flashlight_mode existed carry only the legacy
      * pp/shadows keys. pp+shadows was the pre-calibration per-pixel look, so
@@ -1720,6 +1958,22 @@ void PcConfig_SaveBindLines(const char* const* lines, int count)
         }
     }
     fclose(f);
+}
+
+/* One weapon's vr_grip_<id> line: its grip offset and its model scale. */
+void PcConfig_SaveGrip(int invItemId)
+{
+    const int w = PcConfig_GripSlot(invItemId);
+    char      key[24], val[112];
+    const float* g;
+
+    if (w < 0)
+        return;
+    g = g_PcConfig.vrGrip[w];
+    snprintf(key, sizeof(key), "vr_grip_%d", invItemId);
+    snprintf(val, sizeof(val), "%.1f %.1f %.1f %.1f %.1f %.1f %.0f", (double)g[0], (double)g[1], (double)g[2],
+             (double)g[3], (double)g[4], (double)g[5], (double)g_PcConfig.vrGripScale[w]);
+    PcConfig_SaveKeyValue(key, val);
 }
 
 void PcConfig_SaveKeyValue(const char* cfgKey, const char* cfgValue)

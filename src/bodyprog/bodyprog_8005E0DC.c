@@ -1707,6 +1707,12 @@ bool func_800611C0(POLY_FT4** poly, s32 idx) // 0x800611C0
     gte_ldv0(&ptr->field_134);
     gte_rtps();
     gte_stsxy(&ptr->field_16C);
+#ifdef SH_PC_PORT
+    /* The 4th corner: recorded here and carried into x3 below, or the quad
+     * (its other three corners come from gte_stsxy3_g3, which records them)
+     * dropped to affine on the integer PSX grid as a whole. */
+    if (GR_NeedViewSpaceData()) PGXP_StoreAddr(&ptr->field_16C, 2);
+#endif
     gte_stsz(&ptr->field_164);
 
     ptr->field_158 = (ptr->field_158 + ptr->field_15C + ptr->field_160 + ptr->field_164) >> 2;
@@ -1727,6 +1733,12 @@ bool func_800611C0(POLY_FT4** poly, s32 idx) // 0x800611C0
     }
 
     *(s32*)&(*poly)->x3 = *(s32*)&ptr->field_16C;
+#ifdef SH_PC_PORT
+    {
+        extern void Shadow_Copy(void* dst, const void* src);
+        Shadow_Copy(&(*poly)->x3, &ptr->field_16C);
+    }
+#endif
 
     ptr->field_17C = !(g_MapOverlayHdr.unkTable1_4C[idx].field_C.s_1.field_0 & 8) << 5;
 
@@ -2669,6 +2681,10 @@ bool func_80063A50(POLY_FT4** poly, s32 idx) // 0x80063A50
         gte_ldv0(&ptr->field_14C);
         gte_rtps();
         gte_stsxy(&ptr->field_1CC);
+#ifdef SH_PC_PORT
+        /* the 4th corner, carried into x3 below (see func_800611C0) */
+        if (GR_NeedViewSpaceData()) PGXP_StoreAddr(&ptr->field_1CC, 2);
+#endif
         gte_stsz(&ptr->field_1C8);
 
         ptr->field_1BC = (ptr->field_1BC + ptr->field_1C0 + ptr->field_1C4 + ptr->field_1C8) >> 2;
@@ -2681,6 +2697,12 @@ bool func_80063A50(POLY_FT4** poly, s32 idx) // 0x80063A50
         }
 
         *(s32*)&(*poly)->x3 = *(s32*)&ptr->field_1CC;
+#ifdef SH_PC_PORT
+        {
+            extern void Shadow_Copy(void* dst, const void* src);
+            Shadow_Copy(&(*poly)->x3, &ptr->field_1CC);
+        }
+#endif
 
         if (!(g_SysWork.field_2388.field_154.effectsInfo_0.field_0.field_0 & 3))
         {

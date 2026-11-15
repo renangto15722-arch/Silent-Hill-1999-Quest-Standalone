@@ -28,6 +28,7 @@
 #include "bodyprog/item_screens.h" /* s_800AEDBC (paper-map marking table) */
 #include "bodyprog/screen/screen_data.h"
 #include "bodyprog/events/bodyprog_data_800A99B4.h" /* g_PaperMapFileIdxs */
+#include "bodyprog/view/vw_calc.h"                  /* Vw_WorldScreenMatrixAtPositionGet (VR sheet) */
 #include "pc_config.h"
 #include "pc_quick_options.h"
 #include "hires_override.h"
@@ -872,3 +873,366 @@ void Pc_MinimapUpdate(void)
 
 /* The GL overlay is gone; keep the symbol so dbg_overlay.c's call is harmless. */
 void Pc_MinimapDraw(void) {}
+
+/* ---- VR paper map in the hand ---------------------------------------------
+ * The same area map image, markings and Harry's arrow, drawn as a sheet in the
+ * world where the hand holds it (vr_interact.c owns the hand, vr_ik.c places
+ * the sheet). World prims like the bullet decals (pc_decals.c): RotTransPers
+ * per vertex, POLY_FT4 from the GsOUT_PACKET_P arena, OT0 buckets. */
+
+/* The current area's paper map is Harry's and its image is loaded. Runs the
+ * deferred loader too, so in Full VR the image is ready whether or not the
+ * minimap HUD is on. */
+int Pc_MinimapVrMapReady(void)
+{
+    int idx = (int)g_SavegamePtr->paperMapIdx;
+
+    if (idx < 0 || idx >= MM_PAPER_MAP_COUNT || !HAS_MAP(idx)) return 0;
+    if (mm_effective_map_idx() != idx) return 0;
+    mm_map_load_tick(idx);
+    return s_mapReady && s_mapIdxLoaded == idx;
+}
+
+/* Sheet-local units: x -L..+L left to right, y -L..+L top to bottom, z = mm
+ * toward the eyes. Big enough that marks and the arrow do not quantise, small
+ * enough that the folded matrix keeps its precision. With PGXP the sheet is
+ * ONE quad: PGXP keeps its texture in perspective, while a subdivided grid
+ * wobbled (each inner vertex rounds to the GTE's integer view space, ~3 mm).
+ * Without PGXP the texture is affine, so the sheet is a grid then. */
+#define VRMAP_L   512
+#define VRMAP_GRID_X 6
+#define VRMAP_GRID_Y 4
+#define VRMAP_MARK_Z  2
+#define VRMAP_ARROW_Z 3
+
+/* Project one sheet-local point STRAIGHT INTO a prim's x/y pair. PGXP keys a
+ * vertex's precise position and depth on the address the GTE stored it to:
+ * projected into a local and copied over, the prim had none, so its stereo
+ * depth fell back to the OT bucket and the sheet grew and slid off the hand
+ * whenever the hand went to the side. */
+static int vrmap_project(s16 x, s16 y, s16 z, s16* xy, s32* otz)
+{
+    SVECTOR v;
+    long    p, flag;
+
+    v.vx = x; v.vy = y; v.vz = z; v.pad = 0;
+    *otz = RotTransPers(&v, (int*)xy, &p, &flag);
+    /* With PGXP the renderer clips the sheet at the near plane itself (held
+     * items down to ~1.5 cm, PsyX_GPU.cpp PGXP_HELD_NEAR_Z), so a corner near
+     * the eyes or off the screen no longer drops the whole sheet - brought up
+     * to the eyes it used to vanish. The integer path still needs the bounds. */
+    {
+        extern int g_PsxUsePgxp;
+        if (g_PsxUsePgxp)
+            return 1;
+    }
+    return *otz > 8 && ABS(xy[0]) <= 2048 && ABS(xy[1]) <= 2048;
+}
+
+/* The held map as a physical sheet of paper (vr_ik.c VrIk_MapSheetFrame puts
+ * it in the hand, locked to the controller):
+ *   front - the game's own paper-map image (the minimap's pool-slot texture,
+ *           loaded from the area's MP_*.TIM and swapped with the area), the
+ *           game's markings and Harry's arrow on it;
+ *   back  - plain matte paper, a faint top-to-bottom gradient;
+ *   edges - four thin strips, the paper's thickness (VRMAP_THICK mm).
+ * Matte: everything is shaded by the view angle only, no highlight.
+ * The eye passes are painter-ordered (no depth test), so the side that faces
+ * the eyes is drawn last: in one OT bucket addPrim pushes to the head, so the
+ * top-most prim is added first. */
+#define VRMAP_THICK 2   /* mm */
+
+static u8 vrmap_shade(int c, float k)
+{
+    int v = (int)lrintf((float)c * k);
+    return (u8)((v < 0) ? 0 : (v > 255) ? 255 : v);
+}
+
+void Pc_MinimapVrSheetDraw(GsOT* ot)
+{
+    extern int Pc_VrPickupsInWorld(void);
+    extern int VrInteract_MapHand(void);
+    extern int VrIk_MapSheetFrame(int hand, float centre[3], float right[3], float up[3], float front[3], float* cosView);
+    extern int VrIk_MapHolsterFrame(float centre[3], float right[3], float up[3], float front[3], float* cosView);
+    extern int g_PsxUsePgxp;
+    const int  nx = g_PsxUsePgxp ? 1 : VRMAP_GRID_X;
+    const int  ny = g_PsxUsePgxp ? 1 : VRMAP_GRID_Y;
+    float      c[3], r[3], u[3], t[3], cosView = 1.0f, k;
+    MATRIX     m;
+    s32        otz, sum = 0, bucket, packed;
+    POLY_FT4*  sheet = NULL;
+    POLY_G4*   back  = NULL;
+    POLY_F4*   edges;
+    POLY_FT4*  poly;
+    POLY_F3*   tri;
+    PACKET*    pk;
+    int        hand, face, i, j, n, idx, lum;
+
+    if (!Pc_VrPickupsInWorld()) return;
+    if (!Pc_MinimapVrMapReady()) return;   /* also keeps the image loading */
+    /* in the hand, or folded in its holster (vr_ik.c; nothing when no slot is Map) */
+    hand = VrInteract_MapHand();
+    face = (hand >= 0) ? VrIk_MapSheetFrame(hand, c, r, u, t, &cosView)
+                       : VrIk_MapHolsterFrame(c, r, u, t, &cosView);
+    if (face == 0) return;
+
+    /* Matte paper: brightness from the view angle alone (no specular), never
+     * so dark the map stops reading. 128 = the texture as it is. */
+    k   = 0.70f + 0.30f * fabsf(cosView);
+    lum = (int)lrintf(128.0f * k);
+
+    /* The sheet as a model: its axes (per sheet-local unit, see VRMAP_L) and
+     * centre as a coordinate, through the same view the hands, the held
+     * weapon and the holsters are drawn with (Vw_CoordToWorldAndViewMatrices).
+     * Vw_WorldScreenMatrixAtPositionGet is another camera - without the VR
+     * head offset - which half a meter from the eyes moved the sheet off the
+     * hand and blew it up whenever the hand went to the side. */
+    {
+        static GsCOORDINATE2 s_sheetCoord;
+        MATRIX               worldMat;
+        for (i = 0; i < 3; i++)
+        {
+            const float* axis[3] = { r, u, t };
+            const float  div[3]  = { (float)VRMAP_L, -(float)VRMAP_L, 1.0f };
+            for (j = 0; j < 3; j++)
+                s_sheetCoord.coord.m[i][j] = (s16)lrintf(axis[j][i] / div[j] * 4096.0f);
+            s_sheetCoord.coord.t[i] = (s32)lrintf(c[i]);
+        }
+        s_sheetCoord.super = NULL;
+        s_sheetCoord.flg   = 0;
+        Vw_CoordToWorldAndViewMatrices(&s_sheetCoord, &worldMat, &m);
+
+        /* The coordinate above holds the sheet's centre in whole world units
+         * (1/256 m) and its axes in Q12, so the sheet stood still while the
+         * hand moved and then jumped a whole unit - ~5 mm, a 6 px hop half a
+         * meter from the eyes (Renan's staircase test: 0, 0, 0, then 6 px).
+         * The same view matrix is registered with PGXP from the float frame:
+         * rotation = view * sheet axes, translation = view * (centre - camera),
+         * exactly what Vw_CoordToWorldAndViewMatrices computes in integers
+         * (VbWvsMatrix about the camera at D_800C3868). PGXP then projects
+         * every vertex of the sheet from that, so it follows the hand
+         * continuously. No effect without PGXP. */
+        {
+            extern MATRIX VbWvsMatrix;
+            extern MATRIX D_800C3868;
+            extern void   PGXP_MatrixRegister(const MATRIX* matrix, const double exactValues[9]);
+            extern void   PGXP_MatrixRegisterTranslation(MATRIX* matrix, const double exactValues[3]);
+            double rot[9], tr[3];
+            int    a, b, kk;
+
+            for (a = 0; a < 3; a++)
+            {
+                const float* axis[3] = { r, u, t };
+                const float  div[3]  = { (float)VRMAP_L, -(float)VRMAP_L, 1.0f };
+                for (b = 0; b < 3; b++)
+                {
+                    double s = 0.0;
+                    for (kk = 0; kk < 3; kk++)
+                        s += (double)VbWvsMatrix.m[a][kk] * ((double)axis[b][kk] / (double)div[b]);
+                    rot[a * 3 + b] = s / 4096.0;
+                }
+                tr[a] = (double)VbWvsMatrix.t[a];
+                for (kk = 0; kk < 3; kk++)
+                    tr[a] += (double)VbWvsMatrix.m[a][kk] * ((double)c[kk] - (double)D_800C3868.t[kk]) / 4096.0;
+            }
+            PGXP_MatrixRegister(&m, rot);
+            PGXP_MatrixRegisterTranslation(&m, tr);
+        }
+    }
+    SetRotMatrix(&m);
+    SetTransMatrix(&m);
+
+    pk = GsOUT_PACKET_P;
+
+    /* ---- the visible face: the printed front, or the paper back ---- */
+    if (face > 0)
+    {
+        /* the map image over the whole front, UV 0..max = the whole TIM, which
+         * is 4:3 on screen like the sheet (VR_MAP_SHEET_W x _H): no stretch.
+         * One cell with PGXP (perspective-correct), a grid without (affine). */
+        sheet = (POLY_FT4*)pk;
+        for (i = 0; i < nx; i++)
+        {
+            for (j = 0; j < ny; j++)
+            {
+                POLY_FT4* c4 = &sheet[i * ny + j];
+                s16*      xy[4] = { &c4->x0, &c4->x1, &c4->x2, &c4->x3 };
+                int       q;
+
+                setPolyFT4(c4);
+                for (q = 0; q < 4; q++)
+                {
+                    const int ci = i + (q & 1), cj = j + ((q >> 1) & 1);
+                    if (!vrmap_project((s16)(-VRMAP_L + (2 * VRMAP_L * ci) / nx),
+                                       (s16)(-VRMAP_L + (2 * VRMAP_L * cj) / ny), 0, xy[q], &otz))
+                        return;   /* the sheet reaches behind the near plane */
+                    if ((ci == 0 || ci == nx) && (cj == 0 || cj == ny))
+                        sum += otz;   /* the four sheet corners, once each */
+                }
+                setRGB0(c4, (u8)lum, (u8)lum, (u8)lum);
+                c4->tpage = 0;
+                c4->clut  = MM_CLUT;
+                c4->u0 = (u8)((MM_UV_MAX * i) / nx);       c4->v0 = (u8)((MM_UV_MAX * j) / ny);
+                c4->u1 = (u8)((MM_UV_MAX * (i + 1)) / nx); c4->v1 = c4->v0;
+                c4->u2 = c4->u0;                           c4->v2 = (u8)((MM_UV_MAX * (j + 1)) / ny);
+                c4->u3 = c4->u1;                           c4->v3 = c4->v2;
+            }
+        }
+        pk = (PACKET*)&sheet[nx * ny];
+    }
+    else
+    {
+        s16* xy[4];
+        int  q;
+
+        back = (POLY_G4*)pk;
+        setPolyG4(back);
+        xy[0] = &back->x0; xy[1] = &back->x1; xy[2] = &back->x2; xy[3] = &back->x3;
+        for (q = 0; q < 4; q++)
+        {
+            if (!vrmap_project((q & 1) ? VRMAP_L : -VRMAP_L, (q & 2) ? VRMAP_L : -VRMAP_L, -VRMAP_THICK,
+                               xy[q], &otz))
+                return;
+            sum += otz;
+        }
+        /* plain paper, a touch lighter at the top */
+        setRGB0(back, vrmap_shade(170, k), vrmap_shade(162, k), vrmap_shade(142, k));
+        setRGB1(back, vrmap_shade(170, k), vrmap_shade(162, k), vrmap_shade(142, k));
+        setRGB2(back, vrmap_shade(150, k), vrmap_shade(142, k), vrmap_shade(124, k));
+        setRGB3(back, vrmap_shade(150, k), vrmap_shade(142, k), vrmap_shade(124, k));
+        pk = (PACKET*)(back + 1);
+    }
+
+    /* OT0's scale, like the decals (pc_decals.c DECAL_OT_SHIFT) */
+    bucket = ((sum >> 2) >> 1) - 1;
+    if (bucket < 1) bucket = 1;
+    if (bucket >= ORDERING_TABLE_SIZE) bucket = ORDERING_TABLE_SIZE - 1;
+
+    /* ---- the edges: the paper's thickness, between the front (z 0) and the
+     * back (z -VRMAP_THICK), each corner straight into its prim ---- */
+    edges = (POLY_F4*)pk;
+    n     = 0;
+    {
+        static const s8 ex[4][2] = { { -1, 1 }, { 1, 1 }, { 1, -1 }, { -1, -1 } };   /* top, right, bottom, left */
+        static const s8 ey[4][2] = { { -1, -1 }, { -1, 1 }, { 1, 1 }, { 1, -1 } };
+        for (i = 0; i < 4; i++)
+        {
+            POLY_F4* e = &edges[n];
+            s16*     xy[4] = { &e->x0, &e->x1, &e->x2, &e->x3 };
+            int      q, ok = 1;
+
+            setPolyF4(e);
+            for (q = 0; q < 4 && ok; q++)
+            {
+                const int end = q & 1;
+                ok = vrmap_project((s16)(ex[i][end] * VRMAP_L), (s16)(ey[i][end] * VRMAP_L),
+                                   (q & 2) ? -VRMAP_THICK : 0, xy[q], &otz);
+            }
+            if (!ok) continue;
+            setRGB0(e, vrmap_shade(118, k), vrmap_shade(110, k), vrmap_shade(94, k));
+            n++;
+        }
+    }
+    pk = (PACKET*)&edges[n];
+
+    if (face < 0)
+    {
+        /* the back is the top-most: add it first, then the edges */
+        addPrim(&ot->org[bucket], back);
+        for (i = 0; i < n; i++)
+            addPrim(&ot->org[bucket], &edges[i]);
+        GsOUT_PACKET_P = pk;
+        return;
+    }
+
+    /* ---- the front: arrow, markings, the printed sheet, then the edges ---- */
+    tri = (POLY_F3*)pk;
+
+    g_PcMapQueryAngle = g_SysWork.playerWork.player.rotation.vy;
+    g_PcMapQueryOnly  = 1;
+    idx    = (int)g_SavegamePtr->paperMapIdx;
+    packed = mm_query_at(idx);
+    g_PcMapQueryOnly  = 0;
+    if (packed != 0)
+    {
+        /* Harry: mapCoordIdxX -160..160, Z -120..120 (see MM_HALF_X/Z) */
+        static const s32 lx[3] = {  0, -14,  14 };
+        static const s32 ly[3] = { -24, 14,  14 };
+        s32  hx = ((s32)(s16)(packed & 0xFFFF) * VRMAP_L) / MM_HALF_X;
+        s32  hy = ((s32)(s16)((packed >> 16) & 0xFFFF) * VRMAP_L) / MM_HALF_Z;
+        s32  ca = Math_Cos(g_PcMapQueryAngle), sa = Math_Sin(g_PcMapQueryAngle);
+        s16* xy[3] = { &tri->x0, &tri->x1, &tri->x2 };
+        int  q, ok = 1;
+
+        setPolyF3(tri);
+        for (q = 0; q < 3 && ok; q++)
+            ok = vrmap_project((s16)(hx + ((lx[q] * ca - ly[q] * sa) >> 12)),
+                               (s16)(hy + ((lx[q] * sa + ly[q] * ca) >> 12)), VRMAP_ARROW_Z,
+                               xy[q], &otz);
+        if (ok)
+        {
+            setRGB0(tri, 255, 216, 48);
+            addPrim(&ot->org[bucket], tri);
+            tri++;
+        }
+    }
+    poly = (POLY_FT4*)tri;
+
+    /* the markings: func_80068E0C's table walk, as mm_markers_build */
+    if (s_markReady && g_PaperMapMarkingFileIdxs[idx] != NO_VALUE &&
+        g_PaperMapMarkingFileIdxs[idx] == s_markFileLoaded &&
+        D_800AEDBC[idx].ptr_0 != NULL && D_800AEDBC[idx].ptr_4 != NULL)
+    {
+        const s_800AEDBC* tbl = &D_800AEDBC[idx];
+        int nm = (tbl->field_A - tbl->field_8) >> 1;
+
+        for (i = 0; i < nm; i++)
+        {
+            s_800AE8A0_4 place = *(s_800AE8A0_4*)&tbl->ptr_4[i];
+
+            for (j = 0; j < 2; j++)
+            {
+                s_800AE8A0_0 spr;
+                int  spriteIdx = j ? place.field_3 : place.field_2;
+                int  col0, row0, q, ok = 1;
+                s16* xy[4] = { &poly->x0, &poly->x1, &poly->x2, &poly->x3 };
+
+                if (spriteIdx == 0) continue;
+                if (!Savegame_EventFlagGet(tbl->field_8 + (i * 2) + j + 1)) continue;
+                spr  = *(s_800AE8A0_0*)&tbl->ptr_0[spriteIdx];
+                col0 = (place.field_0 * 2) + (MM_MAP_W / 2);
+                row0 = (place.field_1 * 2) + (MM_MAP_H / 2);
+
+                setPolyFT4(poly);
+                for (q = 0; q < 4 && ok; q++)
+                {
+                    const int col = col0 + ((q & 1) ? spr.field_2 : 0);
+                    const int row = row0 + ((q & 2) ? spr.field_3 : 0);
+                    ok = vrmap_project((s16)(-VRMAP_L + (2 * VRMAP_L * col) / MM_MAP_W),
+                                       (s16)(-VRMAP_L + (2 * VRMAP_L * row) / MM_MAP_H), VRMAP_MARK_Z,
+                                       xy[q], &otz);
+                }
+                if (!ok) continue;
+
+                setRGB0(poly, 128, 128, 128);
+                setSemiTrans(poly, 1);   /* subtractive: cyan art off the paper = red (see above) */
+                poly->tpage = getTPage(0, 2, 0, 0);
+                poly->clut  = MM_MARK_CLUT;
+                poly->u0 = spr.field_0;                 poly->v0 = spr.field_1;
+                poly->u1 = spr.field_0 + spr.field_2;   poly->v1 = spr.field_1;
+                poly->u2 = spr.field_0;                 poly->v2 = spr.field_1 + spr.field_3;
+                poly->u3 = spr.field_0 + spr.field_2;   poly->v3 = spr.field_1 + spr.field_3;
+                addPrim(&ot->org[bucket], poly);
+                poly++;
+            }
+        }
+    }
+
+    for (i = 0; i < nx * ny; i++)
+        addPrim(&ot->org[bucket], &sheet[i]);
+    for (i = 0; i < n; i++)
+        addPrim(&ot->org[bucket], &edges[i]);
+
+    GsOUT_PACKET_P = (PACKET*)poly;
+}
+

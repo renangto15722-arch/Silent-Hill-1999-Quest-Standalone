@@ -2,6 +2,9 @@
 
 #include <memory.h>
 #include <psyq/libetc.h>
+#ifdef SH_PC_PORT
+#include <stdlib.h>   /* atoi: the VR Objects rows' vr_grip_<id> keys */
+#endif
 
 #include "bodyprog/bodyprog.h"
 #include "bodyprog/events/radio.h"
@@ -114,8 +117,26 @@ extern float g_PcFmvVolume;
 
 s32 g_PcOptionsMenu_SelectedEntry     = 0;
 s32 g_PcOptionsMenu_PrevSelectedEntry = 0;
-static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Controls, 3 = Camera, 4 = HUD */
-#define PCOPT_PAGE_COUNT 5
+/* VR quick settings: held Y opens PC Options directly on the page last shown
+ * (g_PcConfig.pcOptionsLastPage, kept up to date by the PC Options control)
+ * and leaving it returns to the game. Set by Pc_Options_RequestDirectPc. */
+static s32 s_pcOptDirect = 0;
+
+/* PC Options scroll: the screen shows PCOPT_VISIBLE rows (a row every 16 px
+ * from PCOPT_LINE_BASE_Y on the 240-line screen) starting at g_PcOptScroll,
+ * kept around the selection by PcOpt_ScrollUpdate. Every fixed page fits, so
+ * only the VR Objects lists ever scroll. */
+#define PCOPT_VISIBLE 12
+static s32 g_PcOptScroll = 0;
+
+void Pc_Options_RequestDirectPc(void)
+{
+    s_pcOptDirect = 1;
+}
+
+static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Controls, 3 = Camera, 4 = HUD, 5 = VR, 6 = VR Tuning,
+                                             * 7 = VR Comfort, 8 = VR Body, 9 = VR Objects, 10 = VR Gun Aim, 11 = VR Holsters */
+#define PCOPT_PAGE_COUNT 12
 
 /* Mouse hover moves the selection WITHOUT resetting g_Options_SelectionHighlightTimer:
  * a reset re-arms the LINE_CURSOR_TIMER_MAX gate, which then swallows the click that
@@ -128,7 +149,8 @@ static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Cont
  * which is the right behaviour for a pointer that is already there. */
 s32 g_PcOptions_HighlightSnap = 0;
 
-enum { PCK_INT, PCK_RES, PCK_FILTER, PCK_WINMODE, PCK_VSYNC, PCK_SLIDER, PCK_MAP, PCK_FLMODE, PCK_NEXT, PCK_PREV, PCK_BACK };
+/* PCK_EXPAND: a VR Objects list entry; adjusting it opens / closes the entry (field = its open flag) */
+enum { PCK_INT, PCK_RES, PCK_FILTER, PCK_WINMODE, PCK_VSYNC, PCK_SLIDER, PCK_MAP, PCK_FLMODE, PCK_PRESET, PCK_EXPAND, PCK_NEXT, PCK_PREV, PCK_BACK };
 
 /* PC-options row origin. The heading sits at y=20 and the rows used to start at 56,
  * leaving a full empty row beneath it while the pages ran off the BOTTOM of the
@@ -191,6 +213,38 @@ static const char* const LBL_FLMODE[] = { "Classic", "C_+_Shadows", "Modern", "M
 static const char* const LBL_MMCNR[]  = { "Top_L", "Top_R", "Bottom_L", "Bottom_R" };
 static const char* const LBL_MMMODE[] = { "Off", "Square", "Circle" };
 static const char* const LBL_WHZ[]    = { "30_Hz", "60_Hz" };
+
+/* VR view modes: values match vr_openvr.c VR_STEREO_* (0/1/2) */
+static const int         VAL_VIEWMODE[] = { 0, 1, 2 };
+static const char* const LBL_VIEWMODE[] = { "2D_Screen", "3D_Screen", "Full_VR" };
+static const int         VAL_CUTVIEW[]  = { 0, 2 };
+static const int         VAL_SNAPTURN[] = { 0, 15, 30, 45, 60, 75, 90 };
+static const int         VAL_HOLSTERW[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+static const char* const LBL_HOLSTERW[] = { "None", "Kitchen_Knife", "Steel_Pipe", "Rock_Drill", "Hammer",
+                                            "Chainsaw", "Katana", "Axe", "Handgun", "Hunting_Rifle",
+                                            "Shotgun", "Hyper_Blaster", "Map" };   /* 12 = the paper map (PCCFG_HOLSTER_MAP) */
+static const char* const LBL_SNAPTURN[] = { "Smooth", "15", "30", "45", "60", "75", "90" };
+static const char* const LBL_MOVEDIR[]  = { "Body", "Head" };   /* VAL_ONOFF values */
+static const char* const LBL_CUTVIEW[]  = { "2D_Screen", "Full_VR" };
+static const int         VAL_HMD[]      = { 0, 1, 2, 3, 4, 5, 6 };
+static const char* const LBL_HMD[]      = { "Custom", "Quest_2", "Quest_3", "Quest_3S", "Pico_4", "Vive", "Index" };
+
+/* Headset presets: sensible STARTING points (scale, stereo depth,
+ * convergence) for common HMDs - stereo comfort varies per person and
+ * per optics, so these seed the sliders rather than lock them. Any
+ * manual tweak of those sliders flips the preset back to Custom. */
+static const struct { float scale, depth, conv; } HMD_PRESETS[] = {
+    { 0.0f,  0.0f,   0.0f },   /* Custom: applies nothing */
+    /* True scale (1.0) and parallel eyes (0): Full VR shows the image at
+     * its real angles now. The old 2.5 / 80 compensated the enlarged
+     * fixed-110-deg window and would now double the eye separation. */
+    { 1.00f, 0.030f, 0.0f },   /* Quest 2 */
+    { 1.00f, 0.032f, 0.0f },   /* Quest 3 */
+    { 1.00f, 0.032f, 0.0f },   /* Quest 3S */
+    { 1.00f, 0.031f, 0.0f },   /* Pico 4 */
+    { 1.00f, 0.030f, 0.0f },   /* Vive */
+    { 1.00f, 0.031f, 0.0f },   /* Index */
+};
 
 static const int RES_W[] = { 640, 1280, 1366, 1600, 1920, 2560, 3840 };
 static const int RES_H[] = { 480,  720,  768,  900, 1080, 1440, 2160 };
@@ -308,8 +362,255 @@ static const s_PcOpt PCOPT_H[] = {
      * Menus keep their fixed layouts. */
     { "Text_Size",         NULL, "text_size",              NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.textSize,      NULL, 100.0f, 150.0f, 5.0f },
     { "Prev_Page",         NULL,                           NULL,                    NULL,      0, NULL,      NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL,                           NULL,                    NULL,      0, NULL,      NULL, 0, PCK_NEXT },
     { "Back",              NULL,                           NULL,                    NULL,      0, NULL,      NULL, 0, PCK_BACK },
 };
+
+/* Page 6 (VR): view management & behavior (roadmap items 2-6). All rows are
+ * realtime - vr_tracking reads g_PcConfig live every frame, so changes apply
+ * instantly; the generic machinery persists them to config.cfg. */
+static const s_PcOpt PCOPT_V[] = {
+    { "Game_View_Mode",    &g_PcConfig.vrGameViewMode,     "vr_game_view_mode",     VAL_VIEWMODE, 3, LBL_VIEWMODE, NULL, 1, PCK_INT },
+    { "Cutscene_View",     &g_PcConfig.vrCutsceneViewMode, "vr_cutscene_view_mode", VAL_CUTVIEW,  2, LBL_CUTVIEW,  NULL, 1, PCK_INT },
+    { "Auto_Screen_UI",    &g_PcConfig.vrAutoScreen,       "vr_auto_screen",        VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Headset_Preset",    &g_PcConfig.vrHeadsetPreset,    "vr_headset_preset",     VAL_HMD,      7, LBL_HMD,      NULL, 1, PCK_PRESET },
+    { "VR_Tracking",       &g_PcConfig.vrEnabled,          "vr_enabled",            VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Positional_(6DOF)", &g_PcConfig.vrPositional,       "vr_positional",         VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Cutscene_Tracking", &g_PcConfig.vrTrackCutscenes,   "vr_track_cutscenes",    VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Decoupled_Pitch",   &g_PcConfig.vrFlattenPitch,     "vr_flatten_pitch",      VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Roomscale",         &g_PcConfig.vrRoomscale,        "vr_roomscale",          VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* The VR pages after the first. The screen draws a row every 16 px from
+ * PCOPT_LINE_BASE_Y with no scrolling, so a page holds 11 rows like the others
+ * (8 settings + Prev/Next/Back). VR_Tuning had grown to 13 and VR_Body to 32:
+ * the rows past the bottom could not be seen or reached. */
+
+/* Page 7: VR Tuning - scales, stereo and the screens */
+static const s_PcOpt PCOPT_V2[] = {
+    /* World_Scale: >1 = the world looks bigger (vr_tracking.c VrUnitsPerMeter) */
+    { "World_Scale",       NULL, "vr_scale",              NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScale,          NULL, 0.5f, 2.0f, 0.05f },
+    { "Roomscale_Scale",   NULL, "vr_roomscale_scale",    NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrRoomscaleScale, NULL, 0.25f, 4.0f, 0.25f },
+    { "Stereo_Depth",      NULL, "vr_stereo_depth",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrStereoDepth,    NULL, 0.005f, 0.15f, 0.005f },
+    { "Stereo_Converge",   NULL, "vr_stereo_convergence", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrStereoConv,     NULL, -100.0f, 100.0f, 5.0f },
+    { "Screen_Width",      NULL, "vr_screen_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScreenWidth,    NULL, 0.5f, 8.0f, 0.1f },
+    { "Screen_Distance",   NULL, "vr_screen_distance",    NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScreenDistance, NULL, 0.5f, 10.0f, 0.25f },
+    /* 2D Screen Size: angular size of the 2D interface panel (subtitles,
+     * messages) in Full VR, % of 60 deg wide (vr_full.c) */
+    { "2D_Screen_Size",    NULL, "vr_ui_screen_size",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrUiScreenSize,   NULL, 50.0f, 150.0f, 5.0f },
+    /* Eye Resolution: the eye images' resolution cap, % of the window
+     * (vr_full.c / PsyX_Stereo_SetScale); sharper and steadier edges for
+     * GPU time, never more than the headset's own pixels need */
+    { "Eye_Resolution",    NULL, "vr_eye_res",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrEyeRes,         NULL, 100.0f, 200.0f, 10.0f },
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Page 8: VR Comfort - turning, roll cover and the hands */
+static const s_PcOpt PCOPT_VC[] = {
+    { "Roll_Cover_Deg",    NULL, "vr_fov_roll_cover",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrFovRollCover,   NULL, 0.0f, 30.0f, 1.0f },
+    /* Body Turning Deadzone: angular range in which the body does not
+     * follow head rotation (vr_tracking.c VrTracking_TakeBodyTurn). */
+    { "Body_Turning_Deadzone", NULL, "vr_body_turn_deadzone", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBodyTurnDeadzone, NULL, 0.0f, 90.0f, 1.0f },
+    { "Snap_Turn",         &g_PcConfig.vrSnapTurn,         "vr_snap_turn",          VAL_SNAPTURN, 7, LBL_SNAPTURN, NULL, 1, PCK_INT },
+    /* Walk Direction: the stick walks where the body faces, or where the
+     * headset looks (vr_tracking.c VrTracking_MoveYawOffset) */
+    { "Walk_Direction",    &g_PcConfig.vrMoveDir,          "vr_move_dir",           VAL_ONOFF,    2, LBL_MOVEDIR,  NULL, 1, PCK_INT },
+    /* Hands (vr_interact.c): a grip near an item picks it up; held A opens
+     * the radial wheel. */
+    { "Grab_Radius_m",     NULL, "vr_grab_radius",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrGrabRadius,     NULL, 0.1f, 1.5f, 0.05f },
+    { "Wheel_Size",        NULL, "vr_wheel_size",         NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWheelSize,      NULL, 50.0f, 200.0f, 10.0f },
+    { "Wheel_Opacity",     NULL, "vr_wheel_opacity",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWheelOpacity,   NULL, 20.0f, 100.0f, 10.0f },
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Page 9: VR Body (pc_port/src/vr_ik.c): head lock and the player's height
+ * (holsters). The hands are the GTA SA VR hands (vr_hands.c), no settings. */
+static const s_PcOpt PCOPT_VB[] = {
+    { "Head_Lock",         &g_PcConfig.vrHeadLock,         "vr_head_lock",          VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
+    /* Player Height: your height in cm; Harry is scaled from his feet to it.
+     * 0 = his own size. Head Height still places the camera. */
+    { "Player_Height_cm",  NULL, "vr_player_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrPlayerHeight,   NULL, 0.0f, 220.0f, 1.0f },
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Page 10: VR Objects - where every object held in VR sits, by category, in
+ * lists that expand and collapse: Weapons (one entry per weapon) and Map.
+ * Each opens to Position X/Y/Z (cm), Rotation X/Y/Z (deg) and Scale (%),
+ * its own values only, live: a weapon's are its vr_grip_<id> line (offset in
+ * the controller's frame + model scale, vr_ik.c VrIk_HeldItemMatrix /
+ * vr_weapon_hd.c), the map's the vr_map_* keys (vr_ik.c VrIk_MapSheetFrame).
+ * X = right, Y = up, Z = forward; rotation X = pitch, Y = yaw, Z = roll.
+ * Rows are built each time the page is asked for (PcOpt_VrObjectsBuild), from
+ * which entries are open; the screen scrolls (PCOPT_VISIBLE). Replaces the VR
+ * Weapon Grip page (equipped weapon only) and the VR Map in Hand page. */
+static const struct { int item; const char* name; } VROBJ_WEAPONS[] = {
+    { 128, "Kitchen_Knife" }, { 129, "Steel_Pipe" },   { 132, "Hammer" },        { 135, "Axe" },
+    { 134, "Katana" },        { 133, "Chainsaw" },     { 130, "Rock_Drill" },    { 160, "Handgun" },
+    { 161, "Hunting_Rifle" }, { 162, "Shotgun" },      { 163, "Hyper_Blaster" },
+};
+#define VROBJ_WEAPON_COUNT ((int)(sizeof(VROBJ_WEAPONS) / sizeof(VROBJ_WEAPONS[0])))
+#define VROBJ_MAX_ROWS     (2 + VROBJ_WEAPON_COUNT * 8 + 8 + 3)
+
+static int     s_vrObjCatOpen[2] = { 1, 0 };            /* Weapons, Map */
+static int     s_vrObjWeaponOpen[VROBJ_WEAPON_COUNT];
+static char    s_vrObjLabels[2 + VROBJ_WEAPON_COUNT][40];
+static char    s_vrObjGripKeys[VROBJ_WEAPON_COUNT][16];
+static s_PcOpt s_vrObjRows[VROBJ_MAX_ROWS];
+
+/* the seven settings, as rows: label, which value, range, step */
+static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_WEAPON_ROWS[7] = {
+    { "______Position_X_cm", 2, -20.0f,  20.0f, 0.5f },   /* vrGrip[]: fwd up right pitch yaw roll */
+    { "______Position_Y_cm", 1, -20.0f,  20.0f, 0.5f },
+    { "______Position_Z_cm", 0, -20.0f,  20.0f, 0.5f },
+    { "______Rotation_X_deg", 3, -180.0f, 180.0f, 5.0f },
+    { "______Rotation_Y_deg", 4, -180.0f, 180.0f, 5.0f },
+    { "______Rotation_Z_deg", 5, -180.0f, 180.0f, 5.0f },
+    { "______Scale",         -1, 50.0f,  200.0f, 5.0f },
+};
+static const struct { const char* name; const char* key; int idx; float lo, hi, step; } VROBJ_MAP_ROWS[7] = {
+    { "___Position_X_cm",  "vr_map_right", 2, -30.0f,  30.0f, 0.5f },
+    { "___Position_Y_cm",  "vr_map_up",    1, -30.0f,  30.0f, 0.5f },
+    { "___Position_Z_cm",  "vr_map_fwd",   0, -30.0f,  30.0f, 0.5f },
+    { "___Rotation_X_deg", "vr_map_pitch", 3, -90.0f,  90.0f, 5.0f },
+    { "___Rotation_Y_deg", "vr_map_yaw",   4, -90.0f,  90.0f, 5.0f },
+    { "___Rotation_Z_deg", "vr_map_roll",  5, -180.0f, 180.0f, 5.0f },
+    { "___Scale",          "vr_map_scale", -1, 50.0f,  200.0f, 5.0f },
+};
+
+static int PcOpt_VrObjectsBuild(void)
+{
+    const s_PcOpt prev = { "Prev_Page", NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV };
+    const s_PcOpt next = { "Next_Page", NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT };
+    const s_PcOpt back = { "Back",      NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK };
+    const int     equipped = (int)g_SavegamePtr->equippedWeapon & 0xFF;
+    int           n = 0, w, k;
+
+    memset(s_vrObjRows, 0, sizeof(s_vrObjRows));
+
+    /* Weapons */
+    snprintf(s_vrObjLabels[0], sizeof(s_vrObjLabels[0]), "[%c]_Weapons", s_vrObjCatOpen[0] ? '-' : '+');
+    s_vrObjRows[n].name = s_vrObjLabels[0]; s_vrObjRows[n].field = &s_vrObjCatOpen[0];
+    s_vrObjRows[n].kind = PCK_EXPAND;       s_vrObjRows[n].realtime = 1; n++;
+    if (s_vrObjCatOpen[0])
+    {
+        for (w = 0; w < VROBJ_WEAPON_COUNT; w++)
+        {
+            const int item = VROBJ_WEAPONS[w].item;
+            const int slot = PcConfig_GripSlot(item);
+            snprintf(s_vrObjLabels[2 + w], sizeof(s_vrObjLabels[0]), "___[%c]_%s%s", s_vrObjWeaponOpen[w] ? '-' : '+',
+                     VROBJ_WEAPONS[w].name, (item == equipped) ? "_-_in_hand" : "");
+            s_vrObjRows[n].name = s_vrObjLabels[2 + w]; s_vrObjRows[n].field = &s_vrObjWeaponOpen[w];
+            s_vrObjRows[n].kind = PCK_EXPAND;           s_vrObjRows[n].realtime = 1; n++;
+            if (!s_vrObjWeaponOpen[w] || slot < 0)
+                continue;
+            snprintf(s_vrObjGripKeys[w], sizeof(s_vrObjGripKeys[w]), "vr_grip_%d", item);
+            for (k = 0; k < 7; k++)
+            {
+                s_PcOpt* r = &s_vrObjRows[n++];
+                r->name     = VROBJ_WEAPON_ROWS[k].name;
+                r->key      = s_vrObjGripKeys[w];   /* saved as the whole line: PcOpt_SaveSlider */
+                r->realtime = 1;
+                r->kind     = PCK_SLIDER;
+                r->ffield   = (VROBJ_WEAPON_ROWS[k].idx >= 0) ? &g_PcConfig.vrGrip[slot][VROBJ_WEAPON_ROWS[k].idx]
+                                                              : &g_PcConfig.vrGripScale[slot];
+                r->fmin  = VROBJ_WEAPON_ROWS[k].lo;
+                r->fmax  = VROBJ_WEAPON_ROWS[k].hi;
+                r->fstep = VROBJ_WEAPON_ROWS[k].step;
+            }
+        }
+    }
+
+    /* Map */
+    snprintf(s_vrObjLabels[1], sizeof(s_vrObjLabels[1]), "[%c]_Map", s_vrObjCatOpen[1] ? '-' : '+');
+    s_vrObjRows[n].name = s_vrObjLabels[1]; s_vrObjRows[n].field = &s_vrObjCatOpen[1];
+    s_vrObjRows[n].kind = PCK_EXPAND;       s_vrObjRows[n].realtime = 1; n++;
+    if (s_vrObjCatOpen[1])
+    {
+        for (k = 0; k < 7; k++)
+        {
+            s_PcOpt* r = &s_vrObjRows[n++];
+            r->name     = VROBJ_MAP_ROWS[k].name;
+            r->key      = VROBJ_MAP_ROWS[k].key;
+            r->realtime = 1;
+            r->kind     = PCK_SLIDER;
+            r->ffield   = (VROBJ_MAP_ROWS[k].idx >= 0) ? &g_PcConfig.vrMapOfs[VROBJ_MAP_ROWS[k].idx]
+                                                       : &g_PcConfig.vrMapScale;
+            r->fmin  = VROBJ_MAP_ROWS[k].lo;
+            r->fmax  = VROBJ_MAP_ROWS[k].hi;
+            r->fstep = VROBJ_MAP_ROWS[k].step;
+        }
+    }
+
+    s_vrObjRows[n++] = prev;
+    s_vrObjRows[n++] = next;
+    s_vrObjRows[n++] = back;
+    return n;
+}
+
+/* A slider's value into config.cfg: a weapon's row rewrites its whole
+ * vr_grip_<id> line (offset + scale), any other row its own key. */
+static void PcOpt_SaveSlider(const s_PcOpt* e)
+{
+    char fb[16];
+    if (e->key == NULL || e->ffield == NULL)
+        return;
+    if (strncmp(e->key, "vr_grip_", 8) == 0)
+    {
+        PcConfig_SaveGrip(atoi(e->key + 8));
+        return;
+    }
+    snprintf(fb, sizeof(fb), "%.3f", *e->ffield);
+    PcConfig_SaveKeyValue(e->key, fb);
+}
+
+/* Page 11: VR Gun Aim (vr_ik.c VrIk_GetGunRay): where the shot leaves (the
+ * muzzle) and where it points, from the right controller's aim pose. The
+ * shot, the bullet and the crosshair dot all use this ray; live. */
+static const s_PcOpt PCOPT_VA[] = {
+    { "Muzzle_Forward_cm", NULL, "vr_aim_fwd",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[0],      NULL, -30.0f, 30.0f, 0.5f },
+    { "Muzzle_Up_cm",      NULL, "vr_aim_up",             NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[1],      NULL, -30.0f, 30.0f, 0.5f },
+    { "Muzzle_Right_cm",   NULL, "vr_aim_right",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[2],      NULL, -30.0f, 30.0f, 0.5f },
+    { "Aim_Pitch_deg",     NULL, "vr_aim_pitch",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[3],      NULL, -45.0f, 45.0f, 0.5f },
+    { "Aim_Yaw_deg",       NULL, "vr_aim_yaw",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[4],      NULL, -45.0f, 45.0f, 0.5f },
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Page 12: VR Holsters (vr_ik.c / vr_interact.c): six on the body, a weapon
+ * (or the map) each. */
+static const s_PcOpt PCOPT_VH[] = {
+    { "Holsters",          &g_PcConfig.vrHolsterOn,        "vr_holster",            VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
+    { "Left_Hip",          &g_PcConfig.vrHolsterSlot[0],   "vr_holster_hip_l",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Right_Hip",         &g_PcConfig.vrHolsterSlot[1],   "vr_holster_hip_r",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Left_Chest",        &g_PcConfig.vrHolsterSlot[2],   "vr_holster_chest_l",    VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Right_Chest",       &g_PcConfig.vrHolsterSlot[3],   "vr_holster_chest_r",    VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Behind_Left_Shoulder",  &g_PcConfig.vrHolsterSlot[4], "vr_holster_back_l",   VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Behind_Right_Shoulder", &g_PcConfig.vrHolsterSlot[5], "vr_holster_back_r",   VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    /* the last page: no Next */
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Every page by index (g_PcOptionsMenu_Page); 4 = HUD; PCOPT_PAGE_VROBJ is
+ * built on demand (PcOpt_VrObjectsBuild). */
+#define PCOPT_PAGE_VROBJ 9
+#define PCOPT_TABLE(t) { t, (int)(sizeof(t) / sizeof((t)[0])) }
+static const struct { const s_PcOpt* tbl; int count; } PCOPT_PAGES[PCOPT_PAGE_COUNT] = {
+    PCOPT_TABLE(PCOPT_G),  PCOPT_TABLE(PCOPT_S),  PCOPT_TABLE(PCOPT_C),  PCOPT_TABLE(PCOPT_T),
+    PCOPT_TABLE(PCOPT_H),  PCOPT_TABLE(PCOPT_V),  PCOPT_TABLE(PCOPT_V2), PCOPT_TABLE(PCOPT_VC),
+    PCOPT_TABLE(PCOPT_VB), { NULL, 0 },           PCOPT_TABLE(PCOPT_VA), PCOPT_TABLE(PCOPT_VH),
+};
+#undef PCOPT_TABLE
 
 static void Options_PcOptionsMenu_EntryStringsDraw(void);
 static void Options_PcOptionsMenu_ConfigDraw(void);
@@ -341,22 +642,20 @@ static void PcMouse_InjectDir(int dir)
 
 const s_PcOpt* PcOpt_PageByIndex(int page, int* count)
 {
-    if (page == 0) { *count = (int)(sizeof(PCOPT_G) / sizeof(PCOPT_G[0])); return PCOPT_G; }
-    if (page == 1) { *count = (int)(sizeof(PCOPT_S) / sizeof(PCOPT_S[0])); return PCOPT_S; }
-    if (page == 2) { *count = (int)(sizeof(PCOPT_C) / sizeof(PCOPT_C[0])); return PCOPT_C; }
-    if (page == 3) { *count = (int)(sizeof(PCOPT_T) / sizeof(PCOPT_T[0])); return PCOPT_T; }
-    *count = (int)(sizeof(PCOPT_H) / sizeof(PCOPT_H[0]));
-    return PCOPT_H;
+    if (page < 0 || page >= PCOPT_PAGE_COUNT)
+        page = 4;   /* HUD, as before */
+    if (page == PCOPT_PAGE_VROBJ)
+    {
+        *count = PcOpt_VrObjectsBuild();
+        return s_vrObjRows;
+    }
+    *count = PCOPT_PAGES[page].count;
+    return PCOPT_PAGES[page].tbl;
 }
 
 static const s_PcOpt* PcOpt_Page(int* count)
 {
-    if (g_PcOptionsMenu_Page == 0) { *count = (int)(sizeof(PCOPT_G) / sizeof(PCOPT_G[0])); return PCOPT_G; }
-    if (g_PcOptionsMenu_Page == 1) { *count = (int)(sizeof(PCOPT_S) / sizeof(PCOPT_S[0])); return PCOPT_S; }
-    if (g_PcOptionsMenu_Page == 2) { *count = (int)(sizeof(PCOPT_C) / sizeof(PCOPT_C[0])); return PCOPT_C; }
-    if (g_PcOptionsMenu_Page == 3) { *count = (int)(sizeof(PCOPT_T) / sizeof(PCOPT_T[0])); return PCOPT_T; }
-    *count = (int)(sizeof(PCOPT_H) / sizeof(PCOPT_H[0]));
-    return PCOPT_H;
+    return PcOpt_PageByIndex(g_PcOptionsMenu_Page, count);
 }
 
 static int PcOpt_ValIndex(const s_PcOpt* e)
@@ -370,6 +669,21 @@ static int PcOpt_ValIndex(const s_PcOpt* e)
     return 0;
 }
 
+/* Holster rows (vr_holster_*): the weapon list is cut to what Harry owns
+ * (vr_ik.c VrIk_WeaponOwned). A row is one of them when its field lies in
+ * g_PcConfig.vrHolsterSlot. */
+static int PcOpt_IsHolsterRow(const s_PcOpt* e)
+{
+    return e->field >= &g_PcConfig.vrHolsterSlot[0] && e->field < &g_PcConfig.vrHolsterSlot[6];
+}
+
+static int PcOpt_HolsterValueOwned(int v)
+{
+    extern int VrIk_WeaponOwned(int itemId);
+    /* the map is always offered: it shows in its holster once Harry has the area's map */
+    return v == 0 || v == PCCFG_HOLSTER_MAP || VrIk_WeaponOwned(PcConfig_HolsterWeapon(v));
+}
+
 static const char* PcOpt_ValueLabel(const s_PcOpt* e, char* buf, int bufsz)
 {
     if (e->kind == PCK_RES) {
@@ -380,6 +694,8 @@ static const char* PcOpt_ValueLabel(const s_PcOpt* e, char* buf, int bufsz)
         snprintf(buf, bufsz, "%.2f", e->ffield ? *e->ffield : 0.0f);
         return buf;
     }
+    if (e->kind == PCK_EXPAND)
+        return "";   /* the [+] / [-] in its name says it all */
     if (e->kind == PCK_MAP) {
         return g_PcConfig.mapName[0] ? g_PcConfig.mapName : "map0_s00";
     }
@@ -387,6 +703,9 @@ static const char* PcOpt_ValueLabel(const s_PcOpt* e, char* buf, int bufsz)
         return "";
     {
         int idx = PcOpt_ValIndex(e);
+        /* a weapon Harry does not have yet: the slot is empty */
+        if (PcOpt_IsHolsterRow(e) && !PcOpt_HolsterValueOwned(e->vals[idx]))
+            idx = 0;
         if (e->labels) return e->labels[idx];
         snprintf(buf, bufsz, "%d", e->vals[idx]);
         return buf;
@@ -412,6 +731,20 @@ static void PcOpt_SliderDragApply(const s_PcOpt* e, int steps)
     if (e->flive) *e->flive = v;
 }
 
+/* Hand-tuning a preset-managed slider demotes the preset to Custom
+ * so the label never lies about what the values are. */
+static void PcOpt_PresetDemote(const s_PcOpt* e)
+{
+    if ((e->ffield == &g_PcConfig.vrScale ||
+         e->ffield == &g_PcConfig.vrStereoDepth ||
+         e->ffield == &g_PcConfig.vrStereoConv) &&
+        g_PcConfig.vrHeadsetPreset != 0)
+    {
+        g_PcConfig.vrHeadsetPreset = 0;
+        PcConfig_SaveKeyValue("vr_headset_preset", "0");
+    }
+}
+
 static void PcOpt_SliderDragCommit(const s_PcOpt* e)
 {
     char fb[16];
@@ -419,8 +752,9 @@ static void PcOpt_SliderDragCommit(const s_PcOpt* e)
     if (e->kind != PCK_SLIDER || !e->ffield || !e->key)
         return;
 
-    snprintf(fb, sizeof(fb), "%.3f", *e->ffield);
-    PcConfig_SaveKeyValue(e->key, fb);
+    (void)fb;
+    PcOpt_SaveSlider(e);
+    PcOpt_PresetDemote(e);
     SH_DBG_ECHO("%s: %.2f", e->name, *e->ffield);
 }
 
@@ -448,8 +782,14 @@ static void PcOpt_Adjust(const s_PcOpt* e, int dir)
         if (v > e->fmax) v = e->fmax;
         if (e->ffield) *e->ffield = v;
         if (e->flive)  *e->flive  = v;
-        if (e->key) { char fb[16]; snprintf(fb, sizeof(fb), "%.3f", v); PcConfig_SaveKeyValue(e->key, fb); }
+        PcOpt_SaveSlider(e);
+        PcOpt_PresetDemote(e);
         SH_DBG_ECHO("%s: %.2f", e->name, v);
+        return;
+    }
+    if (e->kind == PCK_EXPAND) {
+        /* right / a click toggles, left only closes; the page rebuilds from it */
+        if (e->field) *e->field = (dir > 0) ? !*e->field : 0;
         return;
     }
     if (e->kind == PCK_MAP) {
@@ -471,11 +811,38 @@ static void PcOpt_Adjust(const s_PcOpt* e, int dir)
         }
         return;
     }
+    if (e->kind == PCK_PRESET) {
+        int idx = (PcOpt_ValIndex(e) + dir + e->nVals) % e->nVals;
+        *e->field = e->vals[idx];
+        snprintf(buf, sizeof(buf), "%d", *e->field);
+        if (e->key) PcConfig_SaveKeyValue(e->key, buf);
+
+        if (*e->field > 0) {  /* Custom (0) applies nothing */
+            const float sc = HMD_PRESETS[*e->field].scale;
+            const float dp = HMD_PRESETS[*e->field].depth;
+            const float cv = HMD_PRESETS[*e->field].conv;
+            g_PcConfig.vrScale       = sc;
+            g_PcConfig.vrStereoDepth = dp;
+            g_PcConfig.vrStereoConv  = cv;
+            snprintf(vbuf, sizeof(vbuf), "%.3f", sc); PcConfig_SaveKeyValue("vr_scale", vbuf);
+            snprintf(vbuf, sizeof(vbuf), "%.3f", dp); PcConfig_SaveKeyValue("vr_stereo_depth", vbuf);
+            snprintf(vbuf, sizeof(vbuf), "%.3f", cv); PcConfig_SaveKeyValue("vr_stereo_convergence", vbuf);
+            SH_DBG_ECHO("Headset preset applied: scale %.2f depth %.3f conv %.0f", sc, dp, cv);
+        }
+        return;
+    }
     if (e->field == NULL)
         return;
 
     {
         int idx = (PcOpt_ValIndex(e) + dir + e->nVals) % e->nVals;
+        if (PcOpt_IsHolsterRow(e))
+        {
+            /* step past the weapons Harry does not own (None always is) */
+            int guard = e->nVals;
+            while (!PcOpt_HolsterValueOwned(e->vals[idx]) && guard-- > 0)
+                idx = (idx + (dir < 0 ? -1 : 1) + e->nVals) % e->nVals;
+        }
         *e->field = e->vals[idx];
         snprintf(buf, sizeof(buf), "%d", *e->field);
         /* PCK_FILTER writes two keys of its own, on a different scale from the
@@ -1109,6 +1476,8 @@ static void PcOpt_ResetEntry(const s_PcOpt* e)
     char buf[32];
 
     if (e->key == NULL) return;
+    /* a weapon's placement is its own (VR Objects page), not a menu default */
+    if (strncmp(e->key, "vr_grip_", 8) == 0) return;
     if (e->kind == PCK_RES || e->kind == PCK_WINMODE ||
         e->kind == PCK_NEXT || e->kind == PCK_PREV || e->kind == PCK_BACK ||
         e->kind == PCK_MAP) return;
@@ -1238,6 +1607,30 @@ void Options_PcOptionsMenu_Control(void)
     int            count;
     const s_PcOpt* tbl = PcOpt_Page(&count);
 
+    /* the page last shown, for VR's held Y (Pc_Options_RequestDirectPc);
+     * saved when it changes, so it holds across sessions too */
+    if (g_PcOptionsMenu_Page != g_PcConfig.pcOptionsLastPage)
+    {
+        char buf[16];
+        g_PcConfig.pcOptionsLastPage = g_PcOptionsMenu_Page;
+        snprintf(buf, sizeof(buf), "%d", (int)g_PcOptionsMenu_Page);
+        PcConfig_SaveKeyValue("pc_options_last_page", buf);
+    }
+
+    /* the window of rows around the selection (a list may have just opened
+     * or closed, or the page changed) */
+    {
+        const int maxScroll = (count > PCOPT_VISIBLE) ? count - PCOPT_VISIBLE : 0;
+        if (g_PcOptionsMenu_SelectedEntry >= count)
+            g_PcOptionsMenu_SelectedEntry = count - 1;
+        if (g_PcOptionsMenu_SelectedEntry < g_PcOptScroll)
+            g_PcOptScroll = g_PcOptionsMenu_SelectedEntry;
+        if (g_PcOptionsMenu_SelectedEntry >= g_PcOptScroll + PCOPT_VISIBLE)
+            g_PcOptScroll = g_PcOptionsMenu_SelectedEntry - PCOPT_VISIBLE + 1;
+        if (g_PcOptScroll > maxScroll) g_PcOptScroll = maxScroll;
+        if (g_PcOptScroll < 0) g_PcOptScroll = 0;
+    }
+
     Options_PcOptionsMenu_EntryStringsDraw();
     Options_PcOptionsMenu_ConfigDraw();
     Options_PcOptionsMenu_SelectionHighlightDraw();
@@ -1289,8 +1682,8 @@ void Options_PcOptionsMenu_Control(void)
             {
                 int row = -1, i;
 
-                for (i = 0; i < count; i++) {
-                    int top = PCOPT_LINE_BASE_Y + (i * 16) - 3;
+                for (i = g_PcOptScroll; i < count && i < g_PcOptScroll + PCOPT_VISIBLE; i++) {
+                    int top = PCOPT_LINE_BASE_Y + ((i - g_PcOptScroll) * 16) - 3;
                     if (my >= top && my < top + 16) { row = i; break; }
                 }
 
@@ -1403,14 +1796,17 @@ void Options_PcOptionsMenu_Control(void)
         }
 
         if (g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.enter) {
-            if (sel->kind == PCK_NEXT) {
+            if (sel->kind == PCK_EXPAND) {
                 Sd_PlaySfx(Sfx_MenuConfirm, 0, 64);
-                g_PcOptionsMenu_Page++; /* Graphics -> System -> Controls -> Camera -> HUD */
+                PcOpt_Adjust(sel, +1);   /* open / close the entry */
+            } else if (sel->kind == PCK_NEXT) {
+                Sd_PlaySfx(Sfx_MenuConfirm, 0, 64);
+                g_PcOptionsMenu_Page++; /* Graphics -> System -> Controls -> Camera -> HUD -> VR -> VR Tuning */
                 g_PcOptionsMenu_SelectedEntry = 0;
                 g_Options_SelectionHighlightTimer = 0;
             } else if (sel->kind == PCK_PREV) {
                 Sd_PlaySfx(Sfx_MenuConfirm, 0, 64);
-                g_PcOptionsMenu_Page--; /* HUD -> Camera -> Controls -> System -> Graphics */
+                g_PcOptionsMenu_Page--; /* VR Tuning -> VR -> HUD -> Camera -> Controls -> System -> Graphics */
                 g_PcOptionsMenu_SelectedEntry = 0;
                 g_Options_SelectionHighlightTimer = 0;
             } else if (sel->kind == PCK_BACK) {
@@ -1446,7 +1842,14 @@ static void Options_PcOptionsMenu_EntryStringsDraw(void)
     int            count, i;
     const s_PcOpt* tbl = PcOpt_Page(&count);
     DVECTOR        strPos  = { 100, 20 };
-    const char*    HEADING = "PC_Options";
+    /* Page name as the heading: with one shared "PC_Options" title the VR
+     * pages (6/7, reached with L1/R1) were easy to miss. */
+    static const char* const PAGE_HEADINGS[PCOPT_PAGE_COUNT] = {
+        "Graphics", "System", "Controls", "Camera", "HUD", "VR", "VR_Tuning", "VR_Comfort",
+        "VR_Body", "VR_Objects", "VR_Gun_Aim", "VR_Holsters"
+    };
+    const char*    HEADING = (g_PcOptionsMenu_Page >= 0 && g_PcOptionsMenu_Page < PCOPT_PAGE_COUNT)
+                           ? PAGE_HEADINGS[g_PcOptionsMenu_Page] : "PC_Options";
 
     Gfx_StringSetColor(StringColorId_White);
     Gfx_StringSetPosition(strPos.vx, strPos.vy);
@@ -1459,17 +1862,29 @@ static void Options_PcOptionsMenu_EntryStringsDraw(void)
     {
         extern int g_PcOptResetConfirmActive;
         Gfx_StringSetColor(g_PcOptResetConfirmActive ? StringColorId_Red : StringColorId_White);
-        Gfx_StringSetPosition(232, strPos.vy);
+        /* right of the longest heading ("VR_Weapon_Grip", "VR_Map_in_Hand") */
+        Gfx_StringSetPosition(250, strPos.vy);
         Gfx_Strings2dLayerIdxSet(8);
         Gfx_StringDraw("[R]_Reset", DEFAULT_MAP_MESSAGE_LENGTH);
         Gfx_StringSetColor(StringColorId_White);
     }
 #endif
 
-    for (i = 0; i < count; i++) {
-        Gfx_StringSetPosition(LINE_BASE_X, LINE_BASE_Y + (i * LINE_OFFSET_Y));
+    for (i = g_PcOptScroll; i < count && i < g_PcOptScroll + PCOPT_VISIBLE; i++) {
+        Gfx_StringSetPosition(LINE_BASE_X, LINE_BASE_Y + ((i - g_PcOptScroll) * LINE_OFFSET_Y));
         Gfx_Strings2dLayerIdxSet(8);
         Gfx_StringDraw(tbl[i].name, DEFAULT_MAP_MESSAGE_LENGTH);
+    }
+    /* more rows above / below the window (VR Objects page) */
+    if (g_PcOptScroll > 0) {
+        Gfx_StringSetPosition(LINE_BASE_X - 24, LINE_BASE_Y);
+        Gfx_Strings2dLayerIdxSet(8);
+        Gfx_StringDraw("..", DEFAULT_MAP_MESSAGE_LENGTH);
+    }
+    if (count > g_PcOptScroll + PCOPT_VISIBLE) {
+        Gfx_StringSetPosition(LINE_BASE_X - 24, LINE_BASE_Y + ((PCOPT_VISIBLE - 1) * LINE_OFFSET_Y));
+        Gfx_Strings2dLayerIdxSet(8);
+        Gfx_StringDraw("..", DEFAULT_MAP_MESSAGE_LENGTH);
     }
     Gfx_StringsReset2dLayerIdx();
 
@@ -1496,10 +1911,10 @@ static void Options_PcOptionsMenu_ConfigDraw(void)
     int            valX = (g_PcOptionsMenu_Page == 0) ? 196 : (g_PcOptionsMenu_Page == 1) ? 204 : 240;
 
     Gfx_StringSetColor(StringColorId_White);
-    for (i = 0; i < count; i++) {
+    for (i = g_PcOptScroll; i < count && i < g_PcOptScroll + PCOPT_VISIBLE; i++) {
         const char* v = PcOpt_ValueLabel(&tbl[i], buf, sizeof(buf));
         if (v && v[0]) {
-            Gfx_StringSetPosition(valX, LINE_BASE_Y + (i * LINE_OFFSET_Y));
+            Gfx_StringSetPosition(valX, LINE_BASE_Y + ((i - g_PcOptScroll) * LINE_OFFSET_Y));
             Gfx_Strings2dLayerIdxSet(8);
             Gfx_StringDraw(v, DEFAULT_MAP_MESSAGE_LENGTH);
         }
@@ -1539,9 +1954,16 @@ static void Options_PcOptionsMenu_SelectionHighlightDraw(void)
     if (g_Options_SelectionHighlightTimer == 0 || g_PcOptions_HighlightSnap) {
         g_PcOptions_HighlightSnap = 0;
         selectionHighlightFrom.vx = HILITE_WIDTH + (65536 + HIGHLIGHT_OFFSET_X);
-        selectionHighlightFrom.vy = ((u16)g_PcOptionsMenu_PrevSelectedEntry * LINE_OFFSET_Y) - HIGHLIGHT_OFFSET_Y;
+        /* window lines, not list rows (g_PcOptScroll) */
+        int prevLine = g_PcOptionsMenu_PrevSelectedEntry - g_PcOptScroll;
+        int selLine  = g_PcOptionsMenu_SelectedEntry - g_PcOptScroll;
+        if (prevLine < 0) prevLine = 0;
+        if (prevLine > PCOPT_VISIBLE - 1) prevLine = PCOPT_VISIBLE - 1;
+        if (selLine < 0) selLine = 0;
+        if (selLine > PCOPT_VISIBLE - 1) selLine = PCOPT_VISIBLE - 1;
+        selectionHighlightFrom.vy = ((u16)prevLine * LINE_OFFSET_Y) - HIGHLIGHT_OFFSET_Y;
         selectionHighlightTo.vx   = HILITE_WIDTH + (65536 + HIGHLIGHT_OFFSET_X);
-        selectionHighlightTo.vy   = ((u16)g_PcOptionsMenu_SelectedEntry * LINE_OFFSET_Y) - HIGHLIGHT_OFFSET_Y;
+        selectionHighlightTo.vy   = ((u16)selLine * LINE_OFFSET_Y) - HIGHLIGHT_OFFSET_Y;
     }
 
     interpAlpha = Math_Sin(g_Options_SelectionHighlightTimer << 7);
@@ -1555,8 +1977,8 @@ static void Options_PcOptionsMenu_SelectionHighlightDraw(void)
     highlightLine.vertex0.vy = highlightLine.vertex1.vy;
     Options_Selection_HighlightDraw(&highlightLine, true, false);
 
-    for (i = 0; i < count; i++) {
-        int line = i;
+    for (i = g_PcOptScroll; i < count && i < g_PcOptScroll + PCOPT_VISIBLE; i++) {
+        int line = i - g_PcOptScroll;
         quadVerts = (DVECTOR*)&bulletQuads;
         for (j = 0; j < RECT_VERT_COUNT; j++) {
             quadVerts[j].vx                   = BULLET_QUAD_VERTS_FRONT[j].vx;
@@ -1660,6 +2082,21 @@ void GameState_Options_Update(void) // 0x801E2D44
             g_SysWork.counters_1C[1]              = 0;
             g_GameWork.gameStateSteps[1]  = 0;
             g_GameWork.gameStateSteps[2]  = 0;
+#ifdef SH_PC_PORT
+            /* VR held Y (vr_openvr.c -> Pc_Options_RequestDirectPc): straight
+             * into PC Options, on the page last shown, under the fade-in just
+             * started - no main menu on the way */
+            if (s_pcOptDirect)
+            {
+                g_PcOptionsMenu_Page = g_PcConfig.pcOptionsLastPage;
+                if (g_PcOptionsMenu_Page < 0 || g_PcOptionsMenu_Page >= PCOPT_PAGE_COUNT)
+                    g_PcOptionsMenu_Page = 0;
+                g_PcOptionsMenu_SelectedEntry     = 0;
+                g_PcOptionsMenu_PrevSelectedEntry = 0;
+                g_Options_SelectionHighlightTimer = 0;
+                g_GameWork.gameStateSteps[0]      = OptionsMenuState_PcOptions;
+            }
+#endif
             break;
 
         case OptionsMenuState_LeaveScreenPos:
@@ -1789,6 +2226,14 @@ void GameState_Options_Update(void) // 0x801E2D44
             break;
 
         case OptionsMenuState_LeavePcOptions:
+            if (s_pcOptDirect)
+            {
+                /* opened straight from VR: back out to the game, not the
+                 * main options (the fade-out is already running) */
+                s_pcOptDirect = 0;
+                g_GameWork.gameStateSteps[0] = OptionsMenuState_LeaveMainOptions;
+                break;
+            }
             if (ScreenFade_IsFinished())
             {
                 g_GameWork.gameStateSteps[0] = OptionsMenuState_EnterMainOptions;

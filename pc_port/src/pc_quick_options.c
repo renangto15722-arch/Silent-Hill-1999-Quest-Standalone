@@ -75,7 +75,7 @@ extern void        PcOpt_QuickViewReset(int mode);
 
 #define QO_GARBAGE  48
 #define QO_MAX_ROWS 16
-#define QO_PAGES    10
+#define QO_PAGES    18
 /* Every page lays out on the same row pitch -- the pitch QO_ROW_SLOTS rows
  * would get in the full-height panel -- and the panel shrinks to its rows.
  * Deriving the pitch from each page's own row count made the text a different
@@ -92,8 +92,13 @@ extern void        PcOpt_QuickViewReset(int mode);
 /* ROW_ACTION fires from Confirm/click ONLY -- unlike every other row kind,
  * Left/Right must not trigger it, or scrolling past "Reset View Settings"
  * with the arrows would undo the player's tuning. */
-enum { ROW_OPT = 0, ROW_EXTRA, ROW_PAGE, ROW_CLOSE, ROW_CHEAT, ROW_ACTION };
-enum { QO_A_VIEWRESET = 0, QO_A_KEYBINDS };
+enum { ROW_OPT = 0, ROW_EXTRA, ROW_PAGE, ROW_CLOSE, ROW_CHEAT, ROW_ACTION, ROW_HEADER };
+
+/* ROW_HEADER: a section title (label), never selected. A ROW_OPT with a label
+ * shows that label instead of the option's own name (the header says which
+ * group it belongs to). */
+#define QO_HEADER(t) { ROW_HEADER, NULL, 0, t }
+enum { QO_A_VIEWRESET = 0, QO_A_KEYBINDS, QO_A_GRIPRESET };
 
 typedef struct
 {
@@ -172,6 +177,116 @@ static const QoRowDef s_pageControls[] = {
     { ROW_OPT,   "aim_assist",             0, NULL },
     { ROW_EXTRA, NULL, QO_X_DPADMOVE,        "Disable D-pad for Movement" },
     { ROW_ACTION, NULL, QO_A_KEYBINDS,       "Edit Keybinds" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* VR: every VR setting, in three pages of live rows (the PC Options VR and
+ * VR_Tuning rows, by config key). Opened straight onto the first by holding
+ * Y on the motion controllers (Pc_QuickOptions_ToggleVr). */
+static const QoRowDef s_pageVrView[] = {
+    { ROW_OPT,   "vr_game_view_mode",      0, NULL },
+    { ROW_OPT,   "vr_cutscene_view_mode",  0, NULL },
+    { ROW_OPT,   "vr_auto_screen",         0, NULL },
+    { ROW_OPT,   "vr_headset_preset",      0, NULL },
+    { ROW_OPT,   "vr_enabled",             0, NULL },
+    { ROW_OPT,   "vr_positional",          0, NULL },
+    { ROW_OPT,   "vr_track_cutscenes",     0, NULL },
+    { ROW_OPT,   "vr_flatten_pitch",       0, NULL },
+    { ROW_OPT,   "vr_roomscale",           0, NULL },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+static const QoRowDef s_pageVrComfort[] = {
+    { ROW_OPT,   "vr_body_turn_deadzone",  0, NULL },
+    { ROW_OPT,   "vr_snap_turn",           0, NULL },
+    { ROW_OPT,   "vr_ui_screen_size",      0, NULL },
+    { ROW_OPT,   "vr_eye_res",             0, NULL },
+    { ROW_OPT,   "vr_screen_width",        0, NULL },
+    { ROW_OPT,   "vr_screen_distance",     0, NULL },
+    { ROW_OPT,   "vr_fov_roll_cover",      0, NULL },
+    { ROW_OPT,   "vr_grab_radius",         0, NULL },
+    { ROW_OPT,   "vr_wheel_size",          0, NULL },
+    { ROW_OPT,   "vr_wheel_opacity",       0, NULL },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* VR body (vr_ik.c): head lock, player height and the first-person eye
+ * height / forward-back (the same offsets as the View page). */
+static const QoRowDef s_pageVrBody[] = {
+    { ROW_OPT,    "vr_head_lock",          0, NULL },
+    { ROW_OPT,    "vr_player_height",      0, NULL },
+    { ROW_EXTRA,  NULL, QO_X_FPSHEADY,        "Head Height" },
+    { ROW_EXTRA,  NULL, QO_X_FPSHEADZ,        "Head Forward / Back" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* The equipped weapon in the hand (vr_ik.c VrIk_HeldItemMatrix): offset and
+ * turn in the controller's frame, saved per weapon as it is edited. */
+static const QoRowDef s_pageVrGrip[] = {
+    { ROW_OPT,    "vr_item_fwd",           0, NULL },
+    { ROW_OPT,    "vr_item_up",            0, NULL },
+    { ROW_OPT,    "vr_item_right",         0, NULL },
+    { ROW_OPT,    "vr_item_pitch",         0, NULL },
+    { ROW_OPT,    "vr_item_yaw",           0, NULL },
+    { ROW_OPT,    "vr_item_roll",          0, NULL },
+    { ROW_OPT,    "vr_weapon_size",        0, NULL },   /* all weapons, not per weapon */
+    { ROW_ACTION, NULL, QO_A_GRIPRESET,       "Reset This Weapon" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* The gun ray: shot, bullet and crosshair dot (vr_ik.c VrIk_GetGunRay). Its
+ * own page: with the grip rows it ran past the bottom of the panel. */
+static const QoRowDef s_pageVrGunAim[] = {
+    QO_HEADER("Gun Aim"),
+    { ROW_OPT,    "vr_aim_fwd",            0, "Muzzle Forward" },
+    { ROW_OPT,    "vr_aim_up",             0, "Muzzle Up" },
+    { ROW_OPT,    "vr_aim_right",          0, "Muzzle Right" },
+    { ROW_OPT,    "vr_aim_pitch",          0, "Aim Pitch" },
+    { ROW_OPT,    "vr_aim_yaw",            0, "Aim Yaw" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* The six holsters (vr_ik.c): on/off and the weapon in each. */
+static const QoRowDef s_pageVrHolsters[] = {
+    { ROW_OPT,    "vr_holster",            0, NULL },
+    QO_HEADER("Hips"),
+    { ROW_OPT,    "vr_holster_hip_l",      0, "Left" },
+    { ROW_OPT,    "vr_holster_hip_r",      0, "Right" },
+    QO_HEADER("Chest"),
+    { ROW_OPT,    "vr_holster_chest_l",    0, "Left" },
+    { ROW_OPT,    "vr_holster_chest_r",    0, "Right" },
+    QO_HEADER("Behind the Shoulders"),
+    { ROW_OPT,    "vr_holster_back_l",     0, "Left" },
+    { ROW_OPT,    "vr_holster_back_r",     0, "Right" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+/* The paper map in the hand (vr_ik.c VrIk_MapSheetFrame), live. Its own page:
+ * with the holsters it was 20 rows, past QO_MAX_ROWS and off the panel. */
+static const QoRowDef s_pageVrMapHand[] = {
+    QO_HEADER("Map in Hand"),
+    { ROW_OPT,    "vr_map_fwd",            0, "Forward" },
+    { ROW_OPT,    "vr_map_up",             0, "Up" },
+    { ROW_OPT,    "vr_map_right",          0, "Right" },
+    { ROW_OPT,    "vr_map_pitch",          0, "Pitch" },
+    { ROW_OPT,    "vr_map_yaw",            0, "Yaw" },
+    { ROW_OPT,    "vr_map_roll",           0, "Roll" },
+    QO_NAV_ROW,
+    QO_CLOSE_ROW,
+};
+
+static const QoRowDef s_pageVrStereo[] = {
+    { ROW_OPT,   "vr_scale",               0, NULL },
+    { ROW_OPT,   "vr_roomscale_scale",     0, NULL },
+    { ROW_OPT,   "vr_stereo_depth",        0, NULL },
+    { ROW_OPT,   "vr_stereo_convergence",  0, NULL },
     QO_NAV_ROW,
     QO_CLOSE_ROW,
 };
@@ -355,7 +470,9 @@ static const QoRowDef* qo_cheat_page(int cpage, int actions, int* count)
 }
 
 enum { QO_PG_GFX1 = 0, QO_PG_GFX2, QO_PG_HUD, QO_PG_AUDIO, QO_PG_VIEW,
-       QO_PG_CHEATS1, QO_PG_CHEATS2, QO_PG_DEBUG1, QO_PG_DEBUG2, QO_PG_CONTROLS };
+       QO_PG_CHEATS1, QO_PG_CHEATS2, QO_PG_DEBUG1, QO_PG_DEBUG2, QO_PG_CONTROLS,
+       QO_PG_VR_VIEW, QO_PG_VR_COMFORT, QO_PG_VR_STEREO, QO_PG_VR_BODY, QO_PG_VR_GRIP,
+       QO_PG_VR_GUNAIM, QO_PG_VR_HOLSTERS, QO_PG_VR_MAPHAND };
 
 #define QO_TABLE(t) (*count = (int)(sizeof(t) / sizeof((t)[0])), (t))
 
@@ -372,6 +489,14 @@ static const QoRowDef* qo_page_rows(int page, int* count)
         case QO_PG_DEBUG1:   return qo_cheat_page(PC_CHEATS_PAGE_DEBUG,  0, count);
         case QO_PG_DEBUG2:   return qo_cheat_page(PC_CHEATS_PAGE_DEBUG,  1, count);
         case QO_PG_CONTROLS: return QO_TABLE(s_pageControls);
+        case QO_PG_VR_VIEW:    return QO_TABLE(s_pageVrView);
+        case QO_PG_VR_COMFORT: return QO_TABLE(s_pageVrComfort);
+        case QO_PG_VR_STEREO:  return QO_TABLE(s_pageVrStereo);
+        case QO_PG_VR_BODY:    return QO_TABLE(s_pageVrBody);
+        case QO_PG_VR_GRIP:    return QO_TABLE(s_pageVrGrip);
+        case QO_PG_VR_GUNAIM:  return QO_TABLE(s_pageVrGunAim);
+        case QO_PG_VR_HOLSTERS: return QO_TABLE(s_pageVrHolsters);
+        case QO_PG_VR_MAPHAND: return QO_TABLE(s_pageVrMapHand);
         default:             return QO_TABLE(s_pageGfx1);
     }
 }
@@ -380,7 +505,9 @@ static const QoRowDef* qo_page_rows(int page, int* count)
  * the row already separates its two destinations with one. */
 static const char* const s_pageNames[QO_PAGES] = {
     "Graphics", "Lighting & Effects", "HUD", "Audio", "View",
-    "Cheats", "Cheat Actions", "Debug", "Debug Actions", "Controls" };
+    "Cheats", "Cheat Actions", "Debug", "Debug Actions", "Controls",
+    "VR View", "VR Comfort", "VR Stereo", "VR IK Body", "VR Weapon Grip", "VR Gun Aim",
+    "VR Holsters", "VR Map in Hand" };
 
 /* ------------------------------------------------------------------ */
 /* State                                                               */
@@ -416,6 +543,8 @@ static int            s_fontsScript = -1; /* Pc_LangQuickScript the face was pic
 /* Baked text, re-baked when the pixel size or the page changes; values are
  * re-baked whenever their text changes. */
 static GLuint s_texTitle, s_texHint, s_texHint2;
+static GLuint s_texArrow[2];
+static int    s_arrowW[2], s_arrowH[2];
 static int    s_titleW, s_titleH, s_hintW, s_hintH, s_hint2W, s_hint2H;
 /* The Previous / Next row, in pieces so the mouse glyphs sit inline. */
 enum { QO_NAV_PREV = 0, QO_NAV_SLASH, QO_NAV_NEXT, QO_NAV_DEST, QO_NAV_ICON_R, QO_NAV_ICON_L,
@@ -442,7 +571,11 @@ static float s_geoListT, s_geoRowPitch, s_geoRowH, s_geoPanelL, s_geoPanelR;
  * survive close/reopen within a session. The title-bar rect is published for
  * Update's hit-test the same way the row geometry is. */
 static float s_panelOfsX, s_panelOfsY;
+/* 1 while drawing into the VR 2D interface layer (dbg_overlay.c) */
+int g_PcQoVrLayer = 0;
 static float s_geoTitleB, s_geoTitleT;
+/* VR layer: width of the < > page arrows at the title bar's ends (0 = none) */
+static float s_geoArrowW;
 static int   s_dragging;
 static float s_dragLastX, s_dragLastY;
 static int   s_geoRows;
@@ -1203,6 +1336,8 @@ static void qo_free_text(void)
     qo_atlas_reset();
     s_texCursor = 0; /* re-uploaded on the next draw */
     qo_retire(s_texTitle); s_texTitle = 0;
+    qo_retire(s_texArrow[0]); s_texArrow[0] = 0;
+    qo_retire(s_texArrow[1]); s_texArrow[1] = 0;
     qo_retire(s_texHint);  s_texHint  = 0;
     qo_retire(s_texHint2); s_texHint2 = 0;
     for (i = 0; i < QO_NAV_N; i++)
@@ -1338,7 +1473,9 @@ static void qo_row_name(const QoRowDef* r, char* out, int n)
     const char* src = NULL;
     int i;
 
-    if (r->kind == ROW_OPT)
+    if (r->kind == ROW_OPT && r->label)
+        src = Pc_LangQuick(r->label);
+    else if (r->kind == ROW_OPT)
     {
         const void* h = PcOpt_QuickFind(r->key);
         src = h ? Pc_LangQuickMenu(PcOpt_QuickName(h)) : r->key;
@@ -1493,14 +1630,58 @@ static int qo_key_edge(int sc)
     return edge;
 }
 
+/* Off a ROW_HEADER, stepping the way the cursor was going (+1 / -1). */
+static void qo_skip_header(const QoRowDef* rows, int n, int dir)
+{
+    int guard = n;
+    if (n <= 0) return;
+    while (rows[s_sel].kind == ROW_HEADER && guard-- > 0)
+        s_sel = (s_sel + (dir < 0 ? n - 1 : 1)) % n;
+}
+
+/* -1 = over the title bar's < arrow, +1 = its > arrow, 0 = neither */
+static int qo_title_arrow_at(float px, float py)
+{
+    if (s_geoArrowW <= 0.0f || py < s_geoTitleB || py > s_geoTitleT)
+        return 0;
+    if (px >= s_geoPanelL && px <= s_geoPanelL + s_geoArrowW)
+        return -1;
+    if (px <= s_geoPanelR && px >= s_geoPanelR - s_geoArrowW)
+        return +1;
+    return 0;
+}
+
 static void qo_set_page(int page)
 {
     int n;
+    const QoRowDef* rows;
     s_ddRow = -1;
     s_page = (page + QO_PAGES) % QO_PAGES;
-    qo_page_rows(s_page, &n);
+    rows = qo_page_rows(s_page, &n);
     if (s_sel >= n) s_sel = n - 1;
     if (s_sel < 0)  s_sel = 0;
+    qo_skip_header(rows, n, +1);
+}
+
+/* VR menu: holding Y on the motion controllers (vr_openvr.c) opens this panel
+ * straight onto the VR pages, or closes it. Same gates as the F10 toggle. */
+void Pc_QuickOptions_ToggleVr(void)
+{
+    extern int g_PcConsoleInputActive;
+
+    if (Pc_BindPanel_IsOpen())
+        return;
+    if (s_phase == QO_OPENING || s_phase == QO_SHOWN)
+    {
+        qo_beep(Sfx_MenuCancel);
+        Pc_QuickOptions_Close();
+        return;
+    }
+    if (g_PcConsoleInputActive || g_GameWork.gameState != GameState_InGame ||
+        (g_SysWork.sysFlags & SysFlag_DemoActive))
+        return;
+    qo_open();
+    qo_set_page(QO_PG_VR_VIEW);
 }
 
 /* Paging from the nav row keeps the cursor on the new page's nav row. Pages
@@ -1595,8 +1776,10 @@ static void qo_track_input_device(void)
             return;
         }
     }
-    if (Pc_MouseCursor_Moved() || Pc_MouseCursor_LeftClicked() ||
-        Pc_MouseCursor_RightClicked() || Pc_MouseCursor_WheelStep())
+    /* the VR pointer is the pad's own controller: no switch to key icons */
+    if (!Pc_MouseCursor_VrActive() &&
+        (Pc_MouseCursor_Moved() || Pc_MouseCursor_LeftClicked() ||
+         Pc_MouseCursor_RightClicked() || Pc_MouseCursor_WheelStep()))
     {
         s_navPadIcons = 0;
         return;
@@ -1714,13 +1897,27 @@ void Pc_QuickOptions_Update(int up, int down, int left, int right,
 
     if (close) { qo_beep(Sfx_MenuCancel); Pc_QuickOptions_Close(); return; }
 
+    /* VR layer: the < > arrows at the ends of the title bar turn the page.
+     * g_PcQoVrLayer is only set while Draw runs, so Update goes by the
+     * geometry the last Draw published: arrows exist only in the VR layer. */
+    {
+        float amx, amy;
+
+        if (s_geoArrowW > 0.0f && Pc_MouseCursor_LeftClicked() && Pc_MouseCursor_ViewportPos(&amx, &amy))
+        {
+            const int arrow = qo_title_arrow_at(amx * s_vpW, (1.0f - amy) * s_vpH);
+            if (arrow < 0) pagePrev = 1;
+            if (arrow > 0) pageNext = 1;
+        }
+    }
+
     /* Title-bar drag. Held (not clicked) so it tracks continuously, and it is
      * resolved before the row hit-test below so dragging never also activates
-     * whatever the cursor passes over. */
+     * whatever the cursor passes over. The VR layer's panel does not move. */
     {
         float dmx, dmy;
 
-        if (Pc_MouseCursor_LeftHeld() && Pc_MouseCursor_ViewportPos(&dmx, &dmy))
+        if (s_geoArrowW <= 0.0f && Pc_MouseCursor_LeftHeld() && Pc_MouseCursor_ViewportPos(&dmx, &dmy))
         {
             float px_ = dmx * s_vpW;
             float py_ = (1.0f - dmy) * s_vpH;
@@ -1753,8 +1950,8 @@ void Pc_QuickOptions_Update(int up, int down, int left, int right,
     if (pagePrev) qo_set_page(s_page - 1);
     rows = qo_page_rows(s_page, &nRows);
 
-    if (up)   { s_sel = (s_sel + nRows - 1) % nRows; }
-    if (down) { s_sel = (s_sel + 1) % nRows; }
+    if (up)   { s_sel = (s_sel + nRows - 1) % nRows; qo_skip_header(rows, nRows, -1); }
+    if (down) { s_sel = (s_sel + 1) % nRows;         qo_skip_header(rows, nRows, +1); }
 
     /* Mouse: hover selects, wheel adjusts, left click steps a value up (or
      * runs an action), right click steps it down. */
@@ -1768,7 +1965,7 @@ void Pc_QuickOptions_Update(int up, int down, int left, int right,
         float mpx = mx * s_vpW;
         int   row = (int)((s_geoListT - py) / s_geoRowPitch);
         int   inX = mpx >= s_geoPanelL && mpx <= s_geoPanelR;
-        if (inX && row >= 0 && row < nRows)
+        if (inX && row >= 0 && row < nRows && rows[row].kind != ROW_HEADER)
         {
             if (mMoved) s_sel = row;
             if (mClick)
@@ -1819,6 +2016,12 @@ static void qo_confirm(const QoRowDef* r)
         {
             qo_beep(Sfx_MenuConfirm);
             Pc_BindPanel_Open();
+        }
+        else if (r->extra == QO_A_GRIPRESET)
+        {
+            extern void VrIk_GripReset(void);    /* vr_ik.c */
+            VrIk_GripReset();
+            qo_beep(Sfx_MenuConfirm);
         }
     }
     else
@@ -1975,21 +2178,30 @@ void Pc_QuickOptions_Draw(void)
     }
 
     /* Layout (viewport px, origin bottom-left). Left-anchored rather than
-     * centred so the scene stays visible beside it while you tune. */
+     * centred so the scene stays visible beside it while you tune - except
+     * in the VR interface layer (g_PcQoVrLayer, dbg_overlay.c), which is
+     * itself a panel floating in front of you: there it is centred, larger
+     * and does not take the mouse drag offset. */
     /* One row pitch for every page (see QO_ROW_SLOTS); the panel is as tall as
      * its page, with its top edge where the full-height panel's was so the
      * title bar stays put when the page changes. */
     {
-        const float fullH = 0.74f * vpH;
+        const float fullH = (g_PcQoVrLayer ? 0.80f : 0.74f) * vpH;
 
         titleH   = fullH * 0.09f;
         hintH    = fullH * 0.10f;
         rowPitch = fullH * 0.84f / (float)QO_ROW_SLOTS;
+        /* a page longer than the screen takes a tighter pitch rather than
+         * running rows off it, where they could not be seen or pointed at */
+        if (nRows > 0 && titleH + rowPitch * (float)nRows + hintH > 0.96f * vpH)
+            rowPitch = (0.96f * vpH - titleH - hintH) / (float)nRows;
         panelH   = titleH + rowPitch * (float)nRows + hintH;
-        panelW   = 0.80f * fullH;
+        panelW   = (g_PcQoVrLayer ? 1.00f : 0.80f) * fullH;
         if (panelW > 0.90f * vpW) panelW = 0.90f * vpW;
-        panelL   = vpW * 0.04f;
+        panelL   = g_PcQoVrLayer ? (vpW - panelW) * 0.5f : vpW * 0.04f;
         panelB   = (vpH + fullH) * 0.5f - panelH;
+        if (g_PcQoVrLayer && panelB < vpH * 0.02f)
+            panelB = vpH * 0.02f;   /* a long page grows up, not off the bottom */
     }
 
     /* User drag offset, clamped so a good part of the panel always stays on
@@ -2000,8 +2212,11 @@ void Pc_QuickOptions_Draw(void)
         const float minB = -panelH * 0.75f;
         const float maxB = vpH - panelH * 0.25f;
 
-        panelL += s_panelOfsX;
-        panelB += s_panelOfsY;
+        if (!g_PcQoVrLayer)
+        {
+            panelL += s_panelOfsX;
+            panelB += s_panelOfsY;
+        }
         if (panelL < minL) { s_panelOfsX += minL - panelL; panelL = minL; }
         if (panelL > maxL) { s_panelOfsX += maxL - panelL; panelL = maxL; }
         if (panelB < minB) { s_panelOfsY += minB - panelB; panelB = minB; }
@@ -2047,6 +2262,11 @@ void Pc_QuickOptions_Draw(void)
             snprintf(titleBuf, sizeof(titleBuf), "%s  -  %s", Pc_LangQuick("QUICK OPTIONS"), name);
         s_texTitle = qo_bake(titleBuf, (float)(int)(titleH * 0.46f), &s_titleW, &s_titleH);
     }
+    if (g_PcQoVrLayer && !s_texArrow[0])
+    {
+        s_texArrow[0] = qo_bake("<", (float)(int)(titleH * 0.70f), &s_arrowW[0], &s_arrowH[0]);
+        s_texArrow[1] = qo_bake(">", (float)(int)(titleH * 0.70f), &s_arrowW[1], &s_arrowH[1]);
+    }
     /* Controls footer, on two lines: as one it had to shrink to fit the panel
      * and came out too small to read. Both lines share one size, scaled down
      * once only if the wider of them still overflows. */
@@ -2060,10 +2280,21 @@ void Pc_QuickOptions_Draw(void)
         if (hpx < 7) hpx = 7;
         snprintf(hint, sizeof(hint), "%s    %s    %s", Pc_LangQuick("Up/Down select"),
                  Pc_LangQuick("Left/Right adjust"), Pc_LangQuick("Q/E or PgUp/PgDn page"));
-        snprintf(hint2, sizeof(hint2), "%s    %s    %s", Pc_LangQuick("Drag the title to move"),
-                 Pc_LangQuickFill("{key} or Esc close", "{key}",
-                                  g_PcConfig.keyQuickOptions[0] ? g_PcConfig.keyQuickOptions : "F10"),
-                 Pc_LangQuick("* needs restart"));
+        if (g_PcQoVrLayer)
+        {
+            /* the headset: the controllers' own scheme (vr_openvr.c) */
+            snprintf(hint, sizeof(hint), "%s    %s", Pc_LangQuick("Left stick up/down: select"),
+                     Pc_LangQuick("Left stick left/right: adjust"));
+            snprintf(hint2, sizeof(hint2), "%s    %s    %s", Pc_LangQuick("Point + trigger: click"),
+                     Pc_LangQuick("< > page"), Pc_LangQuick("Hold Y to close"));
+        }
+        else
+        {
+            snprintf(hint2, sizeof(hint2), "%s    %s    %s", Pc_LangQuick("Drag the title to move"),
+                     Pc_LangQuickFill("{key} or Esc close", "{key}",
+                                      g_PcConfig.keyQuickOptions[0] ? g_PcConfig.keyQuickOptions : "F10"),
+                     Pc_LangQuick("* needs restart"));
+        }
         s_texHint  = qo_bake(hint,  (float)hpx, &s_hintW,  &s_hintH);
         s_texHint2 = qo_bake(hint2, (float)hpx, &s_hint2W, &s_hint2H);
         widest = (s_hintW > s_hint2W) ? s_hintW : s_hint2W;
@@ -2086,6 +2317,7 @@ void Pc_QuickOptions_Draw(void)
     s_geoListT = listT; s_geoRowPitch = rowPitch; s_geoRowH = rowH;
     s_geoPanelL = panelL; s_geoPanelR = panelR; s_geoRows = nRows;
     s_geoTitleT = panelT; s_geoTitleB = panelT - titleH;
+    s_geoArrowW = g_PcQoVrLayer ? titleH * 1.4f : 0.0f;
 
     qo_build_white();
 
@@ -2114,6 +2346,23 @@ void Pc_QuickOptions_Draw(void)
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    /* VR layer: its alpha is how much of the world the panel hides, so it
+     * must accumulate (one-minus) rather than square itself away. */
+    if (g_PcQoVrLayer)
+    {
+        /* the layer's alpha is the menu's coverage only (vr_full.c darkens
+         * the world by it): clear it, then let the quads accumulate it */
+        GLfloat   cc[4];
+        GLboolean cm[4];
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+        glGetBooleanv(GL_COLOR_WRITEMASK, cm);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(cc[0], cc[1], cc[2], cc[3]);
+        glColorMask(cm[0], cm[1], cm[2], cm[3]);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    }
     glBlendEquation(GL_FUNC_ADD);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -2121,8 +2370,17 @@ void Pc_QuickOptions_Draw(void)
 #define NX(px_) (-1.0f + 2.0f * (px_) / vpW)
 #define NY(py_) (-1.0f + 2.0f * (py_) / vpH)
 
-    /* Translucent panel -- no screen dim, so a change shows in the live scene. */
-    qo_quad(s_texWhite, NX(panelL), NY(panelT), NX(panelR), NY(panelB), 0.04f, 0.04f, 0.05f, 0.58f * dim);
+    /* Translucent panel -- no screen dim, so a change shows in the live scene.
+     * In VR it floats over the world with no desk behind it: more opaque,
+     * framed by an accent border, so it reads as one solid panel. */
+    if (g_PcQoVrLayer)
+    {
+        qo_quad(s_texWhite, NX(panelL - 3.0f), NY(panelT + 3.0f), NX(panelR + 3.0f), NY(panelB - 3.0f),
+                0.47f, 0.11f, 0.08f, 0.90f * dim);
+        qo_quad(s_texWhite, NX(panelL), NY(panelT), NX(panelR), NY(panelB), 0.035f, 0.035f, 0.045f, 0.90f * dim);
+    }
+    else
+        qo_quad(s_texWhite, NX(panelL), NY(panelT), NX(panelR), NY(panelB), 0.04f, 0.04f, 0.05f, 0.58f * dim);
     /* Title band + rule. */
     qo_quad(s_texWhite, NX(panelL + 2.0f), NY(panelT - 2.0f), NX(panelR - 2.0f), NY(listT),
             0.10f, 0.05f, 0.05f, 0.70f * dim);
@@ -2134,6 +2392,30 @@ void Pc_QuickOptions_Draw(void)
         float ty = panelT - titleH * 0.30f;
         qo_quad(s_texTitle, NX(tx), NY(ty), NX(tx + s_titleW), NY(ty - s_titleH), 1.0f, 0.93f, 0.86f, dim);
     }
+    /* VR layer: the page arrows, lit while the pointer is over them */
+    if (s_geoArrowW > 0.0f)
+    {
+        float amx, amy;
+        int   hot = 0, a;
+
+        if (Pc_MouseCursor_ViewportPos(&amx, &amy))
+            hot = qo_title_arrow_at(amx * vpW, (1.0f - amy) * vpH);
+        for (a = 0; a < 2; a++)
+        {
+            const float l   = a ? panelR - s_geoArrowW : panelL;
+            const float lit = (hot == (a ? 1 : -1)) ? 1.0f : 0.0f;
+
+            qo_quad(s_texWhite, NX(l + 3.0f), NY(panelT - 3.0f), NX(l + s_geoArrowW - 3.0f), NY(listT + 1.0f),
+                    0.47f, 0.11f, 0.08f, (0.35f + 0.50f * lit) * dim);
+            if (s_texArrow[a])
+            {
+                float ax = l + (s_geoArrowW - (float)s_arrowW[a]) * 0.5f;
+                float ay = panelT - (titleH - (float)s_arrowH[a]) * 0.5f;
+                qo_quad(s_texArrow[a], NX(ax), NY(ay), NX(ax + s_arrowW[a]), NY(ay - s_arrowH[a]),
+                        1.0f, 0.93f, 0.86f, dim);
+            }
+        }
+    }
 
     for (i = 0; i < nRows && i < QO_MAX_ROWS; i++)
     {
@@ -2143,9 +2425,14 @@ void Pc_QuickOptions_Draw(void)
         float tH, tY;
         char  txt[64];
 
+        /* VR: every other value row a shade lighter, so a label and its
+         * value line up across the wide panel */
+        if (g_PcQoVrLayer && i != s_sel && QO_IS_VALUE_ROW(r->kind) && (i & 1))
+            qo_quad(s_texWhite, NX(panelL + 4.0f), NY(rowTop), NX(panelR - 4.0f), NY(rowTop - rowH),
+                    1.0f, 1.0f, 1.0f, 0.045f * dim);
         if (i == s_sel)
             qo_quad(s_texWhite, NX(panelL + 4.0f), NY(rowTop), NX(panelR - 4.0f), NY(rowTop - rowH),
-                    0.42f, 0.16f, 0.12f, 0.55f * dim);
+                    0.42f, 0.16f, 0.12f, (g_PcQoVrLayer ? 0.80f : 0.55f) * dim);
 
         if (!s_texLabel[i] && r->kind != ROW_PAGE)
         {
@@ -2164,8 +2451,9 @@ void Pc_QuickOptions_Draw(void)
             }
             if (s_texLabel[i])
             {
+                const float ind = (r->kind == ROW_OPT && r->label) ? pad * 1.2f : 0.0f;
                 tH = (float)s_labelH[i]; tY = rowMid + tH * 0.5f;
-                qo_quad(s_texLabel[i], NX(panelL + pad), NY(tY), NX(panelL + pad + s_labelW[i]), NY(tY - tH),
+                qo_quad(s_texLabel[i], NX(panelL + pad + ind), NY(tY), NX(panelL + pad + ind + s_labelW[i]), NY(tY - tH),
                         0.92f, 0.92f, 0.95f, dim);
             }
             if (s_texValue[i])
@@ -2209,6 +2497,18 @@ void Pc_QuickOptions_Draw(void)
                 }
                 x += (float)s_navW[p] + gap[k] * (float)s_navPx;
             }
+        }
+        else if (r->kind == ROW_HEADER)
+        {
+            /* Section title: accent-coloured, left, over a thin rule. */
+            if (s_texLabel[i])
+            {
+                tH = (float)s_labelH[i]; tY = rowMid + tH * 0.5f;
+                qo_quad(s_texLabel[i], NX(panelL + pad * 0.6f), NY(tY), NX(panelL + pad * 0.6f + s_labelW[i]), NY(tY - tH),
+                        0.95f, 0.55f, 0.42f, dim);
+            }
+            qo_quad(s_texWhite, NX(panelL + pad * 0.6f), NY(rowTop - rowH + 1.0f), NX(panelR - pad * 0.6f), NY(rowTop - rowH - 1.0f),
+                    0.47f, 0.11f, 0.08f, 0.85f * dim);
         }
         else if (s_texLabel[i])
         {
@@ -2282,7 +2582,8 @@ void Pc_QuickOptions_Draw(void)
         if (Pc_MouseCursor_SpriteRgba(rgba))
             s_texCursor = qo_upload_rgba(rgba, 32, 32, 1);
     }
-    if (s_texCursor)
+    /* in the headset only the controller's pointer (vr_full.c) */
+    if (s_texCursor && (!g_PcQoVrLayer || Pc_MouseCursor_VrActive()))
     {
         float cx, cy, cw, ch;
         if (Pc_MouseCursor_GlRect(vpW, vpH, &cx, &cy, &cw, &ch))

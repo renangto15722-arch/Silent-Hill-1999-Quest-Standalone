@@ -356,7 +356,48 @@ typedef struct {
     float cutsceneVShift;   /* console `cutshift`: vertical view shift during cutscenes, PSX rows */
     float reverbScale;      /* reverb depth->wet mapping scale, 0 = leave PsyCross default (2.0) (config key: reverb_scale) */
     float mouseSensitivity;      /* mouse-look sensitivity multiplier for TPS/OTS/FPS cameras, 0.1..4.0; default 1.0 (config key: mouse_sensitivity) */
-    float controllerSensitivity; /* right-stick look sensitivity multiplier for TPS/OTS/FPS cameras, 0.1..4.0; default 1.0 (config key: controller_sensitivity) */
+    /* --- VR head tracking (pc_port/src/vr_tracking.c) --- */
+    int   vrEnabled;        /* master VR tracking switch (config key: vr_enabled) */
+    int   vrPositional;     /* 0 = 3DOF (rotation only) (config key: vr_positional) */
+    int   vrRoomscale;      /* roomscale walking in Classic/FPS (config key: vr_roomscale) */
+    float vrScale;          /* World_Scale: >1 = the world looks bigger, 0.5..2.0 (config key: vr_scale) */
+    float vrRoomscaleScale; /* roomscale step amplification 0.25..4.0 (config key: vr_roomscale_scale) */
+    int   vrTrackCutscenes; /* positional tracking during cutscenes (config key: vr_track_cutscenes) */
+    float vrStereoDepth;    /* stereo half-IPD in meters, 0.005..0.15 (config key: vr_stereo_depth) */
+    float vrStereoConv;     /* stereo convergence in pixels, -100..100 (config key: vr_stereo_convergence) */
+
+    /* VR view management (roadmap items 2-6). View mode values match
+     * vr_openvr.c's VR_STEREO_*: 0 = 2D Screen (flat floating screen),
+     * 1 = 3D Screen (SBS stereo screen), 2 = Full VR. */
+    int vrGameViewMode;     /* gameplay view mode (config key: vr_game_view_mode) */
+    int vrCutsceneViewMode; /* in-engine cutscene view: 0 = 2D screen, 2 = Full VR (vr_cutscene_view_mode) */
+    int vrAutoScreen;       /* auto-drop Full VR -> screen for menus/UI (vr_auto_screen) */
+    int vrHeadsetPreset;    /* 0=Custom 1=Quest2 2=Quest3 3=Quest3S 4=Pico4 5=Vive 6=Index (vr_headset_preset) */
+    int vrFlattenPitch;     /* Full VR: rebuild game camera yaw-only; vertical look = head only (vr_flatten_pitch) */
+    float vrScreenWidth;    /* cinema/floating screen width in meters, 0.5..8 (vr_screen_width) */
+    float vrScreenDistance; /* cinema/floating screen distance in meters, 0.5..10 (vr_screen_distance) */
+    float vrFovRollCover;   /* Full VR: head roll (deg) the widened fov still covers, 0..30 (vr_fov_roll_cover) */
+    float vrBodyTurnDeadzone; /* VR: head yaw (deg) each side before the body turns to follow, 0..90 (vr_body_turn_deadzone) */
+    int   vrSnapTurn;       /* VR: right-stick snap turn in degrees, 0 = smooth turning, else 15..90 in 15s (vr_snap_turn) */
+    float vrUiScreenSize;   /* Full VR: 2D interface panel size in %, 100 = 60 deg wide, 50..150 (vr_ui_screen_size) */
+    float vrEyeRes;         /* Full VR: eye images up to this % of the window's resolution, 100..200 (vr_eye_res); never more than the headset needs */
+    float vrWeaponSize;     /* VR: size of the weapons' close-up models in the hand and holsters, %, 50..200 (vr_weapon_size; vr_weapon_hd.c) */
+    int   pcOptionsLastPage; /* the PC Options page last shown, where VR's held Y opens it (pc_options_last_page; options.c) */
+    float vrPlayerHeight;   /* VR: your height in cm - Harry's body is scaled from his feet to it (as you see it, World_Scale included); 0 = his own size (vr_player_height) */
+    float vrGripEdit[6];    /* VR: the EQUIPPED weapon's grip offset, as the VR Weapon Grip page edits it: forward, up, right (cm), pitch, yaw, roll (deg), controller frame (vr_item_*) */
+    float vrAimOfs[5];      /* VR: the gun ray (shot + crosshair) from the right controller's aim pose: muzzle forward, up, right (cm), pitch, yaw (deg) (vr_aim_*) */
+    float vrMapOfs[6];      /* VR: the paper map in the hand: forward, up, right (cm), pitch, yaw, roll (deg), the sheet's own frame (vr_map_*) */
+    float vrGrip[12][6];    /* VR: the saved grip offset of each weapon, PcConfig_GripSlot order (vr_grip_<inventory id>) */
+    float vrGripScale[12];  /* VR: each weapon's close-up model scale, %, 50..200 (7th value of vr_grip_<id>; vr_weapon_hd.c) */
+    float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..200 (vr_map_scale; vr_ik.c) */
+    int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
+    int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
+    int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */
+    int   vrHeadLock;       /* VR: camera locked to Harry's head, physical head translation ignored (vr_head_lock) */
+    float vrGrabRadius;     /* VR: right grip picks up an item this close to the hand, meters, 0.1..1.5 (vr_grab_radius) */
+    float vrWheelSize;      /* VR: radial wheel size in %, 100 = 20 deg radius, 50..200 (vr_wheel_size) */
+    float vrWheelOpacity;   /* VR: radial wheel brightness in %, 20..100 (vr_wheel_opacity) */
+	float controllerSensitivity; /* right-stick look sensitivity multiplier for TPS/OTS/FPS cameras, 0.1..4.0; default 1.0 (config key: controller_sensitivity) */
 
     /* Two control schemes, selected per-frame at runtime by camera mode and
      * applied via Pc_ApplyActiveControlScheme (main_pc.c). classic = default
@@ -533,6 +574,25 @@ typedef struct {
 
 extern s_PcConfig g_PcConfig;
 
+/* Holster value 12: the paper map (vr_ik.c VrIk_MapHolsterSlot). Not a weapon:
+ * PcConfig_HolsterWeapon reads it as none. */
+#define PCCFG_HOLSTER_MAP 12
+
+/* The holster weapon list (vrHolsterSlot values 1..11) -> inventory item id. */
+static inline int PcConfig_HolsterWeapon(int idx)
+{
+    static const unsigned char ids[12] = { 0, 128, 129, 130, 132, 133, 134, 135, 160, 161, 162, 163 };
+    return (idx >= 1 && idx <= 11) ? ids[idx] : 0;
+}
+
+/* A weapon's row in vrGrip[]: knife..axe (128..135) then handgun..hyper
+ * blaster (160..163); -1 for anything else. */
+static inline int PcConfig_GripSlot(int invItemId)
+{
+    return (invItemId >= 128 && invItemId <= 135) ? invItemId - 128 :
+           (invItemId >= 160 && invItemId <= 163) ? invItemId - 152 : -1;
+}
+
 /* True while the experimental whole-town render mode applies: exterior map,
  * street room, whole_map_exteriors + preload_chunks + resident_textures all
  * on. Implemented in bodyprog_80040B74.c (needs g_Map/g_SavegamePtr). */
@@ -566,6 +626,7 @@ void PcConfig_SaveMapName(const char* mapName);
  * (control_style) and to publish game-owned lists (control_styles) so the
  * launcher reflects whatever the installed build supports. */
 void PcConfig_SaveKeyValue(const char* key, const char* value);
+void PcConfig_SaveGrip(int invItemId);   /* vr_grip_<id>: grip offset + model scale */
 
 /* Set the FMV/voice (XA) master volume [0,1]: clamps, updates g_PcConfig +
  * the live XA source gain, and persists `xa_volume`. Used by the options menu

@@ -3189,6 +3189,16 @@ void vcMakeCamMatAndCamAngByBaseAngAndOfsAng(SVECTOR* cam_mat_ang, MATRIX* cam_m
     cam_mat->t[0] = Q12_TO_Q8(cam_pos->vx);
     cam_mat->t[1] = Q12_TO_Q8(cam_pos->vy);
     cam_mat->t[2] = Q12_TO_Q8(cam_pos->vz);
+#ifdef SH_PC_PORT
+    {
+        /* The camera position loses its low 4 bits here (1/4096 m -> 1/256 m):
+         * walking, the whole view moved in 3- or 4-unit steps per frame. Keep
+         * what was dropped; vwSetViewInfoDirectMatrix publishes it for the
+         * exact view matrices (vw_calc.c) when this matrix becomes the view. */
+        extern void Vw_PcCamSourceSet(const MATRIX* camMat, const VECTOR3* posQ12);
+        Vw_PcCamSourceSet(cam_mat, cam_pos);
+    }
+#endif
 
     Math_RotMatrixZxyNeg(base_cam_ang, &base_mat);
     Math_RotMatrixZxyNeg(ofs_cam_ang, &ofs_mat);

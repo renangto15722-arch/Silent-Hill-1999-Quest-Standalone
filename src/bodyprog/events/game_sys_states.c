@@ -27,6 +27,8 @@ extern s_WorldEnvWork g_WorldEnvWork;
 #ifdef SH_PC_PORT
 #include "pc_pick.h"
 #include "pc_dark_harry.h"
+extern int Pc_VrMenuRequestTake(int which);   /* vr_interact.c: 1 inventory, 2 options */
+extern int Pc_VrPcOptionsRequestTake(void);   /* vr_interact.c: Y held, PC Options on the last page */
 #endif
 #include "bodyprog/events/radio.h"
 #include "bodyprog/demo.h"
@@ -370,6 +372,13 @@ void GameState_InGame_Update(void) // 0x80038BD4
             /* Dark Harry easter egg (pc_dark_harry.c): drawn here with the
              * other world characters. No-op unless he is present. */
             Pc_DarkHarry_Draw();
+            /* the root's spot before the Q12 -> Q8 cut, for PGXP; the VR IK
+             * places and registers it itself (vr_ik.c RootExactRegister) */
+            { extern void Vw_PcExactRootFromPos(const GsCOORDINATE2*, const VECTOR3*);
+              extern int  VrIk_RootExactOwned(void);
+              if (!VrIk_RootExactOwned())
+                  Vw_PcExactRootFromPos(&g_SysWork.playerBoneCoords[HarryBone_Root],
+                                        &g_SysWork.playerWork.player.position); }
             func_8003DA9C(Chara_Harry, g_SysWork.playerBoneCoords, 1, g_SysWork.playerWork.player.timer_C6, 0);
 #else
             func_8003DA9C(Chara_Harry, g_SysWork.playerBoneCoords, 1, g_SysWork.playerWork.player.timer_C6, 0);
@@ -573,7 +582,13 @@ void SysState_Gameplay_Update(void) // 0x80038BD4
     {
         return;
     }
+#ifdef SH_PC_PORT
+    /* VR: X held = inventory, Menu held = options (vr_interact.c) */
+    else if ((g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.item) ||
+             Pc_VrMenuRequestTake(1))
+#else
     else if (g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.item)
+#endif
     {
         SysWork_StateSetNext(SysState_StatusMenu);
     }
@@ -586,7 +601,12 @@ void SysState_Gameplay_Update(void) // 0x80038BD4
         SysWork_StateSetNext(SysState_MapScreen);
         g_SysWork.isMgsStringSet = false;
     }
+#ifdef SH_PC_PORT
+    else if ((g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.option) ||
+             Pc_VrMenuRequestTake(2) || Pc_VrPcOptionsRequestTake())
+#else
     else if (g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.option)
+#endif
     {
         SysWork_StateSetNext(SysState_OptionsMenu);
     }

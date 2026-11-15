@@ -11,6 +11,10 @@
 #ifdef SH_PC_PORT
 #include "pc_config.h"
 #include "sh_log.h"
+
+/* PsyX_GPU.cpp: a projected point's precise data, and corners emitted from it */
+extern void PsyX_PreciseGrab(const void* point, float pt[16]);
+extern void PsyX_PreciseEmit(void* dst, const float pt[16], float dx, float dy);
 #endif
 
 // TODO: Find why removing these includes causes mismatch.
@@ -84,7 +88,9 @@ static POLY_FT4* Pc_SpriteTriToQuad(POLY_FT3* tri)
     u16       clut  = tri->clut;
     u16       tpage = tri->tpage;
     bool      semi  = (tri->code & 2) != 0;
+    float     pt[16];
 
+    PsyX_PreciseGrab(&tri->x0, pt);   /* the projected point, before the rewrite */
     setPolyFT4(quad);
     setSemiTrans(quad, semi);
 
@@ -114,6 +120,11 @@ static POLY_FT4* Pc_SpriteTriToQuad(POLY_FT3* tri)
     quad->u3 = u + w;
     quad->v3 = v + h;
 
+    PsyX_PreciseEmit(&quad->x0, pt, 0.0f, 0.0f);
+    PsyX_PreciseEmit(&quad->x1, pt, (float)w, 0.0f);
+    PsyX_PreciseEmit(&quad->x2, pt, 0.0f, (float)h);
+    PsyX_PreciseEmit(&quad->x3, pt, (float)w, (float)h);
+
     return quad;
 }
 
@@ -126,6 +137,16 @@ static POLY_FT4* Pc_SpriteTriToQuad(POLY_FT3* tri)
  * was unreachable: rain visuals played with no rain sound on map0_s00/map1_s02/
  * map1_s03/map4_s02. Restore the alias. */
 #define sharedData_800DD58C_0_s00 (g_ParticlesAddedCount[1])
+
+/* Sub-pixel sprites. Snow and rain project one or two points with the plain
+ * gte_stsxy (no PGXP store hook) and build the other corners a whole PSX pixel
+ * or a few away, so every flake and streak sat on the integer PSX grid and
+ * hopped a pixel at a time as the camera moved - about 9 px in a VR eye. The
+ * projected point is recorded right after its store (PC_PGXP_STORE, the GTE's
+ * newest FIFO slot), grabbed, and every corner is emitted from it offset by the
+ * same pixel amount: sub-pixel position, the point's own depth (flat sprite,
+ * real eye shift in VR). */
+#define PC_PGXP_STORE(addr, slot) do { if (GR_NeedViewSpaceData()) PGXP_StoreAddr((addr), (slot)); } while (0)
 #endif
 
 // Particle-related functions.
@@ -2818,6 +2839,9 @@ void Particle_SnowDraw(s_Particle* part)
         setPolyFT3(polyFt3);
 
         gte_stsxy(&polyFt3->x0);
+#ifdef SH_PC_PORT
+        PC_PGXP_STORE(&polyFt3->x0, 2);   /* Pc_SpriteTriToQuad builds the flake from it */
+#endif
         gte_stszotz(&zScreenStart);
 
         if (D_800C39A0 == 1 || D_800C39A0 == 4)
@@ -2978,6 +3002,9 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
     s32         bScaled;
     POLY_FT4*   poly;
     s_Particle* localPart;
+#ifdef SH_PC_PORT
+    float       pcPt0[16], pcPt1[16];   /* the streak's two projected points */
+#endif
 
     localPart = part;
     poly      = (POLY_FT4*)GsOUT_PACKET_P;
@@ -3038,6 +3065,10 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
             sp28.vz = Q12_TO_Q8(localPart->position0_0.vz);
 
             gte_stsxy(&poly->x0);
+#ifdef SH_PC_PORT
+            PC_PGXP_STORE(&poly->x0, 2);
+            PsyX_PreciseGrab(&poly->x0, pcPt0);
+#endif
             gte_stszotz(&depth);
             gte_ldv0(&sp28);
             gte_rtps();
@@ -3065,6 +3096,10 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
             depth = depth >> 1;
 
             gte_stsxy(&poly->x1);
+#ifdef SH_PC_PORT
+            PC_PGXP_STORE(&poly->x1, 2);
+            PsyX_PreciseGrab(&poly->x1, pcPt1);
+#endif
 
 
             if (depth > 32 && depth < ORDERING_TABLE_SIZE - 1)
@@ -3123,6 +3158,10 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
 
                 poly->x3 = poly->x1 + 1;
                 poly->y3 = poly->y1;
+#ifdef SH_PC_PORT
+                PsyX_PreciseEmit(&poly->x2, pcPt0, 1.0f, 0.0f);
+                PsyX_PreciseEmit(&poly->x3, pcPt1, 1.0f, 0.0f);
+#endif
 
                 addPrim(&g_OrderingTable0[g_ActiveBufferIdx].org[depth], poly);
                 GsOUT_PACKET_P = (PACKET*)(poly + 1);
@@ -3180,6 +3219,9 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
             sp28.vz = Q12_TO_Q8(localPart->position0_0.vz + colorComp);
 
             gte_stsxy(&poly->x0);
+#ifdef SH_PC_PORT
+            PC_PGXP_STORE(&poly->x0, 2);
+#endif
             gte_stszotz(&depth);
 
             sp30.vx = Q12_TO_Q8(localPart->position0_0.vx + colorComp);
@@ -3253,6 +3295,12 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
             }
 
             gte_stsxy3(&poly->x1, &poly->x2, &poly->x3);
+#ifdef SH_PC_PORT
+            /* the splash ring: four real projected points */
+            PC_PGXP_STORE(&poly->x1, 0);
+            PC_PGXP_STORE(&poly->x2, 1);
+            PC_PGXP_STORE(&poly->x3, 2);
+#endif
 
             if (depth > 32 && depth < ORDERING_TABLE_SIZE - 1)
             {
@@ -3337,6 +3385,10 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
     sp28.vz = Q12_TO_Q8(localPart->position0_0.vz);
 
     gte_stsxy(&poly->x0);
+#ifdef SH_PC_PORT
+    PC_PGXP_STORE(&poly->x0, 2);
+    PsyX_PreciseGrab(&poly->x0, pcPt0);
+#endif
     gte_stszotz(&depth);
     gte_ldv0(&sp28);
     gte_rtps();
@@ -3344,6 +3396,10 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
     depth = depth >> 1;
 
     gte_stsxy(&poly->x1);
+#ifdef SH_PC_PORT
+    PC_PGXP_STORE(&poly->x1, 2);
+    PsyX_PreciseGrab(&poly->x1, pcPt1);
+#endif
 
     if (depth > 32 && depth < ORDERING_TABLE_SIZE - 1)
     {
@@ -3376,6 +3432,11 @@ void Particle_RainDraw(s_Particle* part, s32 arg1)
         poly->x3 = poly->x1 + 1;
         poly->y1++;
         poly->y3 = poly->y1;
+#ifdef SH_PC_PORT
+        PsyX_PreciseEmit(&poly->x2, pcPt0, 1.0f, 0.0f);
+        PsyX_PreciseEmit(&poly->x1, pcPt1, 0.0f, 1.0f);
+        PsyX_PreciseEmit(&poly->x3, pcPt1, 1.0f, 1.0f);
+#endif
 
         addPrim(&g_OrderingTable0[g_ActiveBufferIdx].org[depth], poly);
         GsOUT_PACKET_P = (PACKET*)(poly + 1);

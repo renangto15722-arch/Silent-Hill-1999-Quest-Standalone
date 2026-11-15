@@ -1,4 +1,7 @@
 #include "game.h"
+#ifdef SH_PC_PORT
+#include "pc_config.h"
+#endif
 #include "inline_no_dmpsx.h"
 
 #include <psyq/libpad.h>
@@ -1158,6 +1161,44 @@ void Event_ItemTake(e_InvItemId itemId, s32 itemCount, e_EventFlag eventFlagIdx,
         }
     }
 
+#ifdef SH_PC_PORT
+    /* VR (Full VR, first person): no take screen. The world stays live - no
+     * frozen frame, no item model spun up in front of a still - and the item
+     * stays where it lies until "Yes": the question is all that shows. Harry
+     * is still held for the answer. Common pickups only, like the freeze fix
+     * in EventState_LoadItemModel below. */
+    {
+        extern int Pc_VrPickupsInWorld(void);
+        if (Pc_VrPickupsInWorld())
+        {
+            switch (g_SysWork.sysStateSteps[1])
+            {
+                case EventState_Initialize:
+                    g_MapOverlayHdr.playerControlFreeze();
+                    SysWork_StateStepSet(1, EventState_SelectionDialog);
+                    break;
+
+                case EventState_LoadItemModel:
+                case EventState_SelectionDialog:
+                    Event_DisplayMapMsg(true, mapMsgIdxCpy, 3, NO_VALUE, 0, true); // 3 is "Yes", `NO_VALUE` is "No".
+                    break;
+
+                case EventState_TakeItem:
+                    Savegame_EventFlagSet(eventFlagIdx);   /* collected: now it leaves the world */
+                    Event_InvItemCmd(InvItemCmd_AddItem, itemId, itemCount, false);
+                    SysWork_StateStepIncrement(1);
+                    /* fallthrough */
+
+                default: // "No" (NO_VALUE), or taken
+                    g_MapOverlayHdr.playerControlUnfreeze(false);
+                    SysWork_StateSetNext(SysState_Gameplay);
+                    break;
+            }
+            return;
+        }
+    }
+#endif
+
     switch (g_SysWork.sysStateSteps[1])
     {
         case EventState_Initialize:
@@ -1270,6 +1311,48 @@ void Event_CommonItemTake(u32 pickupType, e_EventFlag eventFlagIdx) // 0x800879F
     #undef EASY_DIFFICULTY_AMMO_COUNT_MULT_MIN
 }
 
+#ifdef SH_PC_PORT
+/* "Yes" on a paper map: its flag and the ones it brings along. Shared by the
+ * stock flow and the VR one below. */
+static void PaperMap_Grant(s32 paperMapFlagIdx)
+{
+    s32 paperMapFlagIdxCpy;
+
+    paperMapFlagIdxCpy                                         = paperMapFlagIdx >> 5;
+    ((s32*)&g_SavegamePtr->paperMapFlags)[paperMapFlagIdxCpy] |= 1 << (paperMapFlagIdx & 0x1F); // TODO: Maybe union?
+
+    // TODO: Demagic paper map flags with an enum.
+    switch (paperMapFlagIdx)
+    {
+        case 6:
+            g_SavegamePtr->paperMapFlags |= (1 << 5) | (1 << 7) | (1 << 8) | (1 << 9) |
+                                            (1 << 10) | (1 << 11) | (1 << 12);
+            break;
+
+        case 17:
+            g_SavegamePtr->paperMapFlags |= 1 << 18;
+            g_SavegamePtr->paperMapFlags |= 1 << 19;
+            g_SavegamePtr->paperMapFlags |= 1 << 21;
+            g_SavegamePtr->paperMapFlags |= 1 << 22;
+            g_SavegamePtr->paperMapFlags |= 1 << 23;
+            break;
+
+        case 16:
+            g_SavegamePtr->paperMapFlags |= 1 << 20;
+            break;
+
+        case 13:
+            g_SavegamePtr->paperMapFlags |= 1 << 14;
+            break;
+
+        case 2:
+            g_SavegamePtr->paperMapFlags |= 1 << 3;
+            break;
+    }
+
+}
+#endif
+
 void Event_PaperMapTake(s32 paperMapFlagIdx, e_EventFlag eventFlagIdx, s32 mapMsgIdx) // 0x80087AF4
 {
     static const RECT RECT = {
@@ -1281,6 +1364,41 @@ void Event_PaperMapTake(s32 paperMapFlagIdx, e_EventFlag eventFlagIdx, s32 mapMs
 
     g_DeltaTime        = Q12(0.0f);
     paperMapFlagIdxCpy = paperMapFlagIdx;
+    (void)paperMapFlagIdxCpy;
+
+#ifdef SH_PC_PORT
+    /* VR: only the question, over the live world (see Event_ItemTake) */
+    {
+        extern int Pc_VrPickupsInWorld(void);
+        if (Pc_VrPickupsInWorld())
+        {
+            switch (g_SysWork.sysStateSteps[1])
+            {
+                case 0:
+                    g_MapOverlayHdr.playerControlFreeze();
+                    SysWork_StateStepSet(1, 3);
+                    break;
+
+                case 1:
+                case 2:
+                case 3:
+                    Event_DisplayMapMsg(true, mapMsgIdx, 4, 5, 0, true); // 4 is "Yes", 5 is "No".
+                    break;
+
+                case 4:
+                    PaperMap_Grant(paperMapFlagIdx);
+                    Savegame_EventFlagSet(eventFlagIdx);
+                    /* fallthrough */
+
+                default:
+                    g_MapOverlayHdr.playerControlUnfreeze(false);
+                    SysWork_StateSetNext(SysState_Gameplay);
+                    break;
+            }
+            return;
+        }
+    }
+#endif
 
     switch (g_SysWork.sysStateSteps[1])
     {
@@ -1324,6 +1442,9 @@ void Event_PaperMapTake(s32 paperMapFlagIdx, e_EventFlag eventFlagIdx, s32 mapMs
             break;
 
         case 4:
+#ifdef SH_PC_PORT
+            PaperMap_Grant(paperMapFlagIdx);
+#else
             paperMapFlagIdxCpy                                         = paperMapFlagIdx >> 5;
             ((s32*)&g_SavegamePtr->paperMapFlags)[paperMapFlagIdxCpy] |= 1 << (paperMapFlagIdx & 0x1F); // TODO: Maybe union?
 
@@ -1356,6 +1477,7 @@ void Event_PaperMapTake(s32 paperMapFlagIdx, e_EventFlag eventFlagIdx, s32 mapMs
                     break;
             }
 
+#endif
             Savegame_EventFlagSet(eventFlagIdx);
             SysWork_StateStepIncrement(1);
 

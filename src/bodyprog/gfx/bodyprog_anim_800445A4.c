@@ -4,6 +4,7 @@
 #include <psyq/strings.h>
 #ifdef SH_PC_PORT
 #include <stdio.h>
+#include <string.h>
 #include "sh_log.h"
 #include "pc_cheats.h"
 #endif
@@ -95,6 +96,87 @@ void Anim_BoneInit(s_AnmHeader* anmHdr, GsCOORDINATE2* boneCoords) // 0x800445A4
 #endif
     }
 }
+
+#ifdef SH_PC_PORT
+/* The lerp below without its truncations, for PGXP (vw_calc.c
+ * Vw_PcExactCoordSet): translations drop up to a whole unit (~4 mm) and
+ * rotations 1/4096 per entry, by an amount that changes with alpha every
+ * frame, so each bone stepped against its neighbours while animating. The
+ * game's integers are untouched. */
+extern int  g_PsxUsePgxp;
+extern void Vw_PcExactCoordSet(const GsCOORDINATE2* c, const double m[9], const double t[3]);
+static double s_pcAnimHipsT[3];
+static s32    s_pcAnimHipsValid;
+static double s_pcAnimTorsoM[9];
+static s32    s_pcAnimTorsoValid;
+
+static void Pc_AnimBoneExact(s_AnmHeader* anmHdr, s_AnmBindPose* bindPose, GsCOORDINATE2* coord,
+                             void* f0Data, void* f0RotData, void* f1Data, void* f1RotData, q19_12 alpha)
+{
+    const s32 scaleLog2 = anmHdr->scaleLog2;
+    double    m[9], t[3];
+    s32       i, j;
+
+    if (!g_PsxUsePgxp || scaleLog2 > Q12_SHIFT)
+        return;
+    for (i = 0; i < 3; i++)
+    {
+        for (j = 0; j < 3; j++) m[i * 3 + j] = (double)coord->coord.m[i][j] / 4096.0;
+        t[i] = (double)coord->coord.t[i];
+    }
+    if (bindPose->translationDataIdx >= 0)
+    {
+        const s8* a = (s8*)f0Data + (bindPose->translationDataIdx * 3);
+        const s8* b = (s8*)f1Data + (bindPose->translationDataIdx * 3);
+        for (i = 0; i < 3; i++)
+            t[i] = (double)(a[i] << scaleLog2) +
+                   (double)((b[i] - a[i]) * alpha) / (double)(1 << (Q12_SHIFT - scaleLog2));
+        if (bindPose->translationDataIdx == 0)
+            t[1] -= (double)anmHdr->rootYOffset;
+    }
+    if (bindPose->rotationDataIdx >= 0)
+    {
+        const s8* a = (s8*)f0RotData + (bindPose->rotationDataIdx * 9);
+        const s8* b = (s8*)f1RotData + (bindPose->rotationDataIdx * 9);
+        for (i = 0; i < 9; i++)
+            m[i] = ((double)(a[i] << 5) + (double)((b[i] - a[i]) * alpha) / 128.0) / 4096.0;
+    }
+    Vw_PcExactCoordSet(coord, m, t);
+    if (coord == &g_SysWork.playerBoneCoords[HarryBone_Hips])
+    {
+        memcpy(s_pcAnimHipsT, t, sizeof(t));
+        s_pcAnimHipsValid = 1;
+    }
+    else if (coord == &g_SysWork.playerBoneCoords[HarryBone_Torso])
+    {
+        memcpy(s_pcAnimTorsoM, m, sizeof(m));
+        s_pcAnimTorsoValid = 1;
+    }
+}
+
+/* Harry's torso takes the hips' translation (below): the exact one too, with
+ * the torso's own exact rotation when it animated this frame. */
+static void Pc_AnimTorsoExact(void)
+{
+    GsCOORDINATE2* torso = &g_SysWork.playerBoneCoords[HarryBone_Torso];
+    double         m[9];
+    s32            i, j;
+
+    if (!g_PsxUsePgxp || !s_pcAnimHipsValid)
+    {
+        s_pcAnimTorsoValid = 0;
+        return;
+    }
+    if (s_pcAnimTorsoValid)
+        memcpy(m, s_pcAnimTorsoM, sizeof(m));
+    else
+        for (i = 0; i < 3; i++)
+            for (j = 0; j < 3; j++) m[i * 3 + j] = (double)torso->coord.m[i][j] / 4096.0;
+    s_pcAnimHipsValid  = 0;
+    s_pcAnimTorsoValid = 0;
+    Vw_PcExactCoordSet(torso, m, s_pcAnimHipsT);
+}
+#endif
 
 void Anim_BoneUpdate(s_AnmHeader* anmHdr, GsCOORDINATE2* boneCoords, s32 keyframe0, s32 keyframe1, q19_12 alpha) // 0x800446D8
 {
@@ -210,6 +292,10 @@ void Anim_BoneUpdate(s_AnmHeader* anmHdr, GsCOORDINATE2* boneCoords, s32 keyfram
                     }
                 }
             }
+#ifdef SH_PC_PORT
+            Pc_AnimBoneExact(anmHdr, curBindPose, curBoneCoord, frame0Data, frame0RotData,
+                             frame1Data, frame1RotData, alpha);
+#endif
         }
     }
 
@@ -220,6 +306,9 @@ void Anim_BoneUpdate(s_AnmHeader* anmHdr, GsCOORDINATE2* boneCoords, s32 keyfram
         {
             g_SysWork.playerBoneCoords[HarryBone_Torso].coord.t[i] = g_SysWork.playerBoneCoords[HarryBone_Hips].coord.t[i];
         }
+#ifdef SH_PC_PORT
+        Pc_AnimTorsoExact();
+#endif
     }
 }
 

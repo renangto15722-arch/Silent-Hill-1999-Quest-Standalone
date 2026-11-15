@@ -895,9 +895,9 @@ int main(int argc, char* argv[])
          * so it's never baked into a frozen pause / "no map" image — fixes the console
          * ghosting/doubling when it was already open before pausing. */
         {
-            extern void DbgOverlay_Render(void);
+            extern void VrOvr_PostCaptureHook(void); /* dev console + VR HMD screen (pc_port/src/vr_openvr.c) */
             extern void (*g_PsyX_PostCaptureHook)(void);
-            g_PsyX_PostCaptureHook = DbgOverlay_Render;
+            g_PsyX_PostCaptureHook = VrOvr_PostCaptureHook;
         }
     }
     int windowWidth = g_PcConfig.windowWidth;
@@ -1051,6 +1051,13 @@ int main(int argc, char* argv[])
         g_PcNativeRender = g_PcConfig.nativeResolution;
         if (g_PcNativeRender)
             SH_LOG("Render: native PSX resolution, %dx%d window", windowWidth, windowHeight);
+    }
+
+    /* VR runtime menu (OpenXR / OpenVR) - before the window, so it is never
+     * hidden behind an exclusive-fullscreen game window. */
+    {
+        extern void VrOvr_ChooseRuntime(void); /* pc_port/src/vr_openvr.c */
+        VrOvr_ChooseRuntime();
     }
 
     /* Initialize PsyCross (creates SDL2 window + OpenGL context) */

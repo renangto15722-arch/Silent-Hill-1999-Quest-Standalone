@@ -192,6 +192,7 @@ void Pc_ControlStyleUpdate(void)
     int          curKey, curPad;
     int          inGameplay;
     int          wantCapture;
+    int          vrHeadCam;
 
     /* Resolve BOTH schemes once; index by the live camera mode each frame so a
      * classic<->altcam switch takes effect immediately. */
@@ -215,6 +216,26 @@ void Pc_ControlStyleUpdate(void)
                   g_SysWork.sysState   == SysState_Gameplay &&
                   !g_PcConsoleInputActive && !g_PcQuickOptionsActive);
 
+    /* VR: a headset always plays through the first-person head camera
+     * (vr_tracking.c). Not persisted - the saved style is back next time
+     * the game runs without VR - and Change Camera is ignored meanwhile. */
+    {
+        extern int VrTracking_HeadCamActive(void);
+        vrHeadCam = VrTracking_HeadCamActive();
+        if (vrHeadCam)
+        {
+            if (g_ControlStyle != ControlStyle_Fps)
+            {
+                g_ControlStyle        = ControlStyle_Fps;
+                g_DebugThirdPersonCam = 1;
+                g_PcFpsCam            = 1;
+                g_TpsCamNeedsReset    = 1;
+                Pc_ControlStyle_ReapplyBinds();
+                SH_DBG_ECHO("[CTRLSTYLE] VR headset -> fps head camera");
+            }
+        }
+    }
+
     keys   = SDL_GetKeyboardState(NULL);
     {
         int sch = g_DebugThirdPersonCam ? 1 : 0; /* which scheme's Change-Camera bind is live */
@@ -223,7 +244,7 @@ void Pc_ControlStyleUpdate(void)
     }
 
     /* Edge-toggle the active style — gameplay only. */
-    if (inGameplay && ((curKey && !prevKey) || (curPad && !prevPad)))
+    if (inGameplay && !vrHeadCam && ((curKey && !prevKey) || (curPad && !prevPad)))
     {
         int next = (g_ControlStyle + 1) % Pc_ControlStyleCount();
         Pc_ControlStyleSet(next);

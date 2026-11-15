@@ -25,6 +25,122 @@ static void Event_ItemTriggersClear(void)
     }
 }
 
+#ifdef SH_PC_PORT
+/* VR hand grab (pc_port/src/vr_interact.c). A pickup is a button-activated
+ * map event; the right grip near one fires that event exactly as the action
+ * button would, through the same checks below - only "is the player standing
+ * in its trigger area, facing it" is replaced by "the hand is at its point".
+ * Index into mapEvents, consumed by the next Event_Update. */
+s32 g_PcVrGrabEvent = NO_VALUE;
+
+/* Pickups only: one-shot button events that run a map function and are
+ * disabled by their own flag afterwards (items, key items). Doors and
+ * area loads (LoadRoom/LoadOverlay), memos (ReadMessage) and the like keep
+ * using the action button. */
+static bool Event_PcVrGrabbable(s_EventData* mapEvent)
+{
+    s16 requiredEventFlag = mapEvent->requiredEventFlag;
+    s16 disabledEventFlag = mapEvent->disabledEventFlag;
+
+    if (mapEvent->triggerType == TriggerType_None ||
+        mapEvent->activationType != TriggerActivationType_Button ||
+        mapEvent->sysState != SysState_EventCallback ||
+        disabledEventFlag == EventFlag_None)
+    {
+        return false;
+    }
+    if (requiredEventFlag != EventFlag_None && !Savegame_EventFlagGet(requiredEventFlag))
+    {
+        return false;
+    }
+    if (Savegame_EventFlagGet(disabledEventFlag))
+    {
+        return false;
+    }
+    return true;
+}
+
+/* Squared XZ distance (Q12) from the hand to an event's trigger shape: the
+ * area the action button works in, so a long item (the steel pipe's points
+ * are segments along it) is grabbed anywhere along it, not only at its
+ * centre point.
+ *   TouchAabb      - the box, half extents triggerParam0/1 * 0.25.
+ *   TouchObbFacing - the segment Event_CollideObbFacingCheck tests: centre
+ *                    -/+ (-cos, sin)(triggerParam0 as a Q8 angle) * p1 / 16.
+ *   others         - the point. */
+static s64 Event_PcVrGrabDist2(const s_MapPoint2d* p, s32 triggerType, s32 handX, s32 handZ)
+{
+    s64 dx = (s64)handX - p->positionX;
+    s64 dz = (s64)handZ - p->positionZ;
+
+    if (triggerType == TriggerType_TouchAabb)
+    {
+        const s64 rx = (s64)p->triggerParam0 * Q12(0.25f);
+        const s64 rz = (s64)p->triggerParam1 * Q12(0.25f);
+        dx = (dx > rx) ? dx - rx : (dx < -rx) ? dx + rx : 0;
+        dz = (dz > rz) ? dz - rz : (dz < -rz) ? dz + rz : 0;
+    }
+    else if (triggerType == TriggerType_TouchObbFacing)
+    {
+        const q19_12 a  = Q12_ANGLE_FROM_Q8(p->triggerParam0);
+        const s64    hx = ((s64)-Math_Cos(a) * (s64)p->triggerParam1) >> 4;
+        const s64    hz = ((s64)Math_Sin(a) * (s64)p->triggerParam1) >> 4;
+        const s64    ll = hx * hx + hz * hz;
+        if (ll > 0)
+        {
+            /* t = clamp(dot(d, h) / |h|^2, -1, 1): the segment's nearest point */
+            double t = (double)(dx * hx + dz * hz) / (double)ll;
+            if (t > 1.0) t = 1.0;
+            if (t < -1.0) t = -1.0;
+            dx -= (s64)(t * (double)hx);
+            dz -= (s64)(t * (double)hz);
+        }
+    }
+    return dx * dx + dz * dz;
+}
+
+/* Nearest grabbable event to the hand (world Q12, XZ; map points are 2D)
+ * within `radius` of its trigger shape, or NO_VALUE. */
+s32 Event_PcVrGrabFind(s32 handX, s32 handZ, s32 radius)
+{
+    s_EventData* mapEvent;
+    s64          bestDist;
+    s32          best = NO_VALUE;
+    s32          i;
+
+    if (g_MapOverlayHdr.mapEvents == NULL || g_MapOverlayHdr.mapPoints == NULL || Player_IsBusy())
+    {
+        return NO_VALUE;
+    }
+
+    bestDist = (s64)radius * radius;
+    for (i = 0; i < 256; i++)
+    {
+        s_MapPoint2d* mapPoint;
+        s64           dist;
+
+        mapEvent = &g_MapOverlayHdr.mapEvents[i];
+        if (mapEvent->triggerType == NO_VALUE)
+        {
+            break;
+        }
+        if (!Event_PcVrGrabbable(mapEvent))
+        {
+            continue;
+        }
+
+        mapPoint = &g_MapOverlayHdr.mapPoints[mapEvent->pointOfInterestIdx];
+        dist     = Event_PcVrGrabDist2(mapPoint, mapEvent->triggerType, handX, handZ);
+        if (dist <= bestDist)
+        {
+            bestDist = dist;
+            best     = i;
+        }
+    }
+    return best;
+}
+#endif
+
 void Event_Update(bool disableButtonEvents) // 0x800373CC
 {
     s_MapPoint2d* mapPoint;
@@ -97,6 +213,11 @@ void Event_Update(bool disableButtonEvents) // 0x800373CC
      * vs PSX. Cap iteration to MAX_MAP_EVENTS so we don't walk wild. */
     const int MAX_MAP_EVENTS = 256; /* map7_s02 has 251 events, the largest across all maps */
     int _eventIdx = -1;
+
+    /* One frame only: a grab that this pass cannot run is dropped. */
+    const s32 vrGrabEvent = g_PcVrGrabEvent;
+    bool      vrGrab;
+    g_PcVrGrabEvent = NO_VALUE;
 #endif
 
     while (true)
@@ -148,17 +269,33 @@ void Event_Update(bool disableButtonEvents) // 0x800373CC
             return;
         }
 
+#ifdef SH_PC_PORT
+        /* VR grab: this event, picked by the hand (Event_PcVrGrabFind). */
+        vrGrab = (_eventIdx == vrGrabEvent && mapEvent->activationType == TriggerActivationType_Button);
+#endif
+
         // `TriggerActivationType_Button`: Only continue processing event when action button is pressed and
         // `Player_IsBusy` returns `false`.
         if (mapEvent->activationType == TriggerActivationType_Button &&
             (!(g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.action) ||
             disableButtonEvents || Player_IsBusy()))
         {
+#ifdef SH_PC_PORT
+            if (!vrGrab || disableButtonEvents || Player_IsBusy())
+#endif
             continue;
         }
 
         mapPoint = &g_MapOverlayHdr.mapPoints[mapEvent->pointOfInterestIdx];
 
+#ifdef SH_PC_PORT
+        /* The hand is at the point: the trigger area/facing test is the
+         * body's stand-in for that, so a grab skips it. */
+        if (vrGrab)
+        {
+        }
+        else
+#endif
         switch (mapEvent->triggerType)
         {
             case TriggerType_TouchAabb:

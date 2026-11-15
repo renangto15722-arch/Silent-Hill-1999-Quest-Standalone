@@ -59,8 +59,36 @@ static int   s_servoActive;
 static int   s_wheelStep;    /* +1/-1 on a new wheel notch this frame, else 0 */
 static int   s_prevWheelUp, s_prevWheelDown;
 
+/* VR POINTER (vr_full.c): while a menu panel is open in the headset - the VR
+ * quick menu, or a game screen on the 2D screen - the right controller's ray
+ * on it IS the mouse: position as a fraction of the picture, trigger = left
+ * button, grip = right. Everything that already takes the mouse (the quick
+ * menu, the inventory, the options, the cursor puzzles) then takes it. */
+static int   s_vrOn, s_vrIn, s_vrL, s_vrR;
+static float s_vrX, s_vrY;
+
+void Pc_MouseCursor_SetVr(int on, int inView, float vx, float vy, int left, int right)
+{
+    s_vrOn = on;
+    s_vrIn = on && inView;
+    s_vrX  = vx;
+    s_vrY  = vy;
+    s_vrL  = on && left;
+    s_vrR  = on && right;
+}
+
+int Pc_MouseCursor_VrActive(void)
+{
+    return s_vrOn;
+}
+
 static int Mc_Enabled(void)
 {
+    if (s_vrOn)
+    {
+        extern int Pc_ConsoleIsOpen(void);
+        return !Pc_ConsoleIsOpen();
+    }
     if (!g_PcConfig.mouseCursor)
         return 0;
     /* Only when the OS cursor is free. In TPS/OTS/FPS the pointer is captured
@@ -194,20 +222,35 @@ void Pc_MouseCursor_FrameUpdate(void)
         s_prevWheelDown = g_PsyX_WheelDownFrames;
     }
 
-    btn         = SDL_GetMouseState(&mx, &my);
-    s_moved     = (mx != s_prevMx || my != s_prevMy);
-    s_prevMx    = mx;
-    s_prevMy    = my;
-    s_leftDown  = (btn & SDL_BUTTON(SDL_BUTTON_LEFT))  != 0;
-    s_rightDown = (btn & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+    if (s_vrOn)
+    {
+        /* the VR pointer: already a fraction of the picture */
+        const float dx = s_vrX - s_vx, dy = s_vrY - s_vy;
+        s_moved     = (dx * dx + dy * dy) > (0.002f * 0.002f);
+        s_leftDown  = s_vrL;
+        s_rightDown = s_vrR;
+        fx = s_vrX;
+        fy = s_vrY;
+    }
+    else
+    {
+        btn         = SDL_GetMouseState(&mx, &my);
+        s_moved     = (mx != s_prevMx || my != s_prevMy);
+        s_prevMx    = mx;
+        s_prevMy    = my;
+        s_leftDown  = (btn & SDL_BUTTON(SDL_BUTTON_LEFT))  != 0;
+        s_rightDown = (btn & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+    }
     s_leftEdge  = (s_leftDown  && !s_prevLeft);
-    s_rightEdge = (s_rightDown && !s_prevRight);
-    s_prevLeft  = s_leftDown;
+    s_rightEdge = (s_rightDown && !s_prevRight);    s_prevLeft  = s_leftDown;
     s_prevRight = s_rightDown;
 
     s_prevGx = s_gx;
     s_prevGy = s_gy;
-    s_inView = PsyX_MapWindowToViewport(mx, my, &fx, &fy);
+    if (s_vrOn)
+        s_inView = s_vrIn;
+    else
+        s_inView = PsyX_MapWindowToViewport(mx, my, &fx, &fy);
     s_vx = fx;
     s_vy = fy;
     /* Mouse -> menu text-authoring space. Height differs by framebuffer mode:

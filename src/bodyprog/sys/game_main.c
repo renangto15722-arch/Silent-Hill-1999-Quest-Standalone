@@ -211,6 +211,9 @@ VECTOR3 g_TpsCamFwd = { 0, 0, Q12(1.0f) };
  * is negative], vz=forward), rotated by his BODY yaw each frame to place the eye
  * between his arms. Captured via the L cam-pos log key or the numpad tuner. */
 extern int g_PcFpsCam;
+/* VR head camera (pc_port/src/vr_tracking.c): a headset holds the FPS eye
+ * still - the sway, head-turn and melee pull-back below are skipped. */
+extern int VrTracking_HeadCamActive(void);
 VECTOR3 g_PcFpsOffset = { -29, -6836, 919 }; /* FPS eye BASELINE in Harry's BODY frame (all weapons); vx=right, vy=up(neg), vz=forward. Head-follow sway rides on top. */
 VECTOR3 g_PcFpsViewFwd = { 0, 0, 4096 };     /* FPS view-forward, WORLD space Q12; published each FPS frame for the head-mounted flashlight */
 VECTOR3 g_PcFpsEyePos  = { 0, 0, 0 };        /* FPS eye WORLD pos (Q19.12); flashlight origin in FPS */
@@ -466,6 +469,20 @@ static void Pc_CameraFov_Update(int standDown)
             standDown = 1;
     }
 
+    /* VR FULL mode sizes the projection to the headset's eye frustum
+     * (pc_port/src/vr_tracking.c); it replaces the alt-cam fov there. */
+    if (Pc_AltCamStateOk() && !standDown)
+    {
+        extern int VrTracking_VrGeomScreen(void);
+        s32 vrH = VrTracking_VrGeomScreen();
+        if (vrH > 0)
+        {
+            SetGeomScreen(vrH);
+            s_fovApplied = 1;
+            return;
+        }
+    }
+
     if (Pc_AltCamStateOk() && !standDown)
     {
         if (g_PcFpsCam)
@@ -685,6 +702,29 @@ static void Pc_TpsCamera_Apply(void)
         if (frozen) { rx = 0; ry = 0; }
         if (rx > -TP_STICK_DEADZONE && rx < TP_STICK_DEADZONE) rx = 0;
         if (ry > -TP_STICK_DEADZONE && ry < TP_STICK_DEADZONE) ry = 0;
+        /* VR snap turn (vr_snap_turn, VR_Tuning menu): a right-stick flick past
+         * ~60% turns one whole step; the next needs the stick back near the
+         * centre first, so holding it never repeats. Same base yaw the smooth
+         * turn moves, so body, view and the body-follow deadzone stay coherent. */
+        {
+            extern int VrTracking_SnapTurnDeg(void);
+            static int s_snapLatched = 0;
+            const int  snapDeg = VrTracking_SnapTurnDeg();
+
+            if (snapDeg > 0)
+            {
+                if (!s_snapLatched && (rx > 80 || rx < -80))
+                {
+                    g_TpsCamYaw  += (rx > 0 ? 1 : -1) * (snapDeg * 4096 / 360);
+                    s_snapLatched = 1;
+                }
+                else if (rx > -40 && rx < 40)
+                {
+                    s_snapLatched = 0;
+                }
+                rx = 0;   /* no smooth yaw on top */
+            }
+        }
         if (rx != 0 || ry != 0) {
             float cs   = g_PcConfig.controllerSensitivity; /* 0.1..4.0, default 1.0 */
             s32 sYaw   = TIMESTEP_SCALE_30_FPS(g_DeltaTime, (s32)(((rx * TP_STICK_YAW)   >> 7) * cs));
@@ -704,6 +744,15 @@ static void Pc_TpsCamera_Apply(void)
                      lx > TP_STICK_DEADZONE || lx < -TP_STICK_DEADZONE ||
                      ly > TP_STICK_DEADZONE || ly < -TP_STICK_DEADZONE)
                 g_PcAimDevice = 1;
+        }
+
+        /* VR: the body follows the headset's yaw once it leaves the
+         * Body_Turning_Deadzone (pc_port/src/vr_tracking.c). Same base yaw the
+         * stick turns, so the FPS body snap in player_control.c carries it. */
+        if (!frozen)
+        {
+            extern int VrTracking_TakeBodyTurn(void);
+            g_TpsCamYaw += VrTracking_TakeBodyTurn();
         }
 
         g_TpsCamYaw = Q12_ANGLE_NORM_U(g_TpsCamYaw + Q12_ANGLE(360.0f));
@@ -758,7 +807,7 @@ static void Pc_TpsCamera_Apply(void)
             rearOfs = (g_PcRearLookActive && !g_PcFpsCam) ? Q12_ANGLE(180.0f) : 0;
         }
         viewYaw = g_TpsCamYaw + rearOfs;
-        if (g_PcFpsCam && g_PcConfig.immersiveFpsHeadTracking)
+        if (g_PcFpsCam && g_PcConfig.immersiveFpsHeadTracking && !VrTracking_HeadCamActive())
         {
             const MATRIX* hm  = &g_SysWork.playerBoneCoords[HarryBone_Head].workm;
             s32   fX   = hm->m[0][2]; /* head-local +Z rotated to world, Q12 */
@@ -914,7 +963,7 @@ static void Pc_TpsCamera_Apply(void)
                     s_fpsHeadRef.vz += (headLocal.vz - s_fpsHeadRef.vz) >> 8;
                 }
 
-                if (s_fpsHeadRefValid)
+                if (s_fpsHeadRefValid && !VrTracking_HeadCamActive())
                 {
                     eyeLocal.vx += headLocal.vx - s_fpsHeadRef.vx;
                     eyeLocal.vy += headLocal.vy - s_fpsHeadRef.vy;
@@ -947,7 +996,8 @@ static void Pc_TpsCamera_Apply(void)
                 #define SWING_PULL_WALL Q12(0.15f) /* keep-out margin from level geometry */
                 /* Dolly cap is player-tunable (View & Aspect page / config
                  * fps_melee_swing, 0..1 world units); 0 disables the pullback. */
-                const s32 swingPullMax = (s32)(g_PcConfig.fpsMeleeSwing * 4096.0f);
+                const s32 swingPullMax = VrTracking_HeadCamActive() ? 0
+                                       : (s32)(g_PcConfig.fpsMeleeSwing * 4096.0f);
                 s32 target = 0;
 
                 if (g_SysWork.playerCombat.weaponAttack != NO_VALUE &&
@@ -2803,6 +2853,14 @@ void MainLoop(void) // 0x80032EE0
                             effectiveFps = 0; /* uncapped */
                         else
                             effectiveFps = g_PcConfig.fpsCap;
+
+                        /* VR: the headset paces every frame (xrWaitFrame /
+                         * WaitGetPoses at 72-120 Hz). A second limiter here
+                         * (fps_cap 60) beat against it - 60 fps on a 90 Hz
+                         * display, uneven frame times, judder on head turns.
+                         * Scripted scenes still clamp to 60 below. */
+                        if (VrTracking_HeadCamActive())
+                            effectiveFps = 0;
 
                         /* Menus, map and puzzle screens have no simulation to pace,
                          * so the fps cap may only RAISE them above the old hard 60fps

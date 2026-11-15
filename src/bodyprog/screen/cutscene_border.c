@@ -1,6 +1,8 @@
 #include "game.h"
 #ifdef SH_PC_PORT
 #include "pc_config.h"
+
+extern int VrTracking_HideCutsceneBars(void); /* pc_port/src/vr_tracking.c */
 #endif
 
 #include <libetc.h>
@@ -255,9 +257,15 @@ void Screen_CutsceneCameraStateUpdate(void) // 0x80032904
     }
 
     ot = &g_OtTags0[g_ActiveBufferIdx][4];
-    AddPrim(ot, poly);
-    AddPrim(ot, &poly[2]);
-    AddPrim(ot, drMode);
+#ifdef SH_PC_PORT
+    /* VR 3D cutscenes run borderless (pc_port/src/vr_tracking.c) */
+    if (!VrTracking_HideCutsceneBars())
+#endif
+    {
+        AddPrim(ot, poly);
+        AddPrim(ot, &poly[2]);
+        AddPrim(ot, drMode);
+    }
 
     if (!(g_SysWork.sysFlags & SysFlag_CutsceneActive))
     {

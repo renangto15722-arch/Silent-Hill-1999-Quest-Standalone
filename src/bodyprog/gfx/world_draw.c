@@ -6,6 +6,8 @@
 #include "pc_config.h"
 #include "pc_big_lm.h"
 #include "pc_playas.h"
+#include "hires_override.h" /* VR holster textures: virtual pool slots */
+#include <stdlib.h>
 #ifdef SH_PC_PORT
 #include "main/fileinfo.h" /* g_GameRegion — PAL BG_ETC material-UV relocation */
 #endif
@@ -26,6 +28,9 @@
 #include "main/fsqueue.h"
 #include "main/rng.h"
 #include "screens/stream/stream.h"
+
+/* bodyprog_80055028.c; called here without a prototype since the decomp. */
+void LmHeader_FixOffsets(s_LmHeader* lmHdr);
 
 const s32 pad_rodata_80025524 = 0;
 
@@ -1058,6 +1063,198 @@ void func_8003D03C(void) // 0x8003D03C
     g_WorldGfxWork.heldItem.bone.modelInfo.field_0 |= 1 << 31;
 }
 
+#ifdef SH_PC_PORT
+/* VR HOLSTERS (vr_ik.c): each slot draws its own copy of its weapon - the
+ * held item has one model and every weapon texture shares one VRAM spot, so
+ * the equipped weapon's model cannot stand in for the others. A copy is the
+ * weapon's PLM in a malloc'd buffer, textured from Harry's TIM (knife,
+ * hammer, axe, guns) or from its own TIM in a persistent virtual GL slot
+ * (448+, free past the chara spills - hires_override.h), the way the chara
+ * pool loads monsters. Loaded on first use, one a frame, from the game update
+ * (vr_ik.c VrIk_ApplyArms -> Pc_VrHolsterModelsUpdate). */
+typedef struct
+{
+    u8*           buf;
+    s_Bone        bone;
+    s_FsImageDesc desc;
+    u8            ready;
+    u8            failed;
+} PcVrHolsterModel;
+
+static PcVrHolsterModel s_vrHolsterModels[12];   /* PcConfig_HolsterWeapon index */
+
+#define VR_HOLSTER_TEX_SLOT_BASE 448
+
+static int VrHolster_WeaponIndex(int itemId)
+{
+    int i;
+    for (i = 1; i <= 11; i++)
+        if (PcConfig_HolsterWeapon(i) == itemId) return i;
+    return 0;
+}
+
+static void VrHolster_Files(int itemId, s32* modelIdx, s32* timIdx, char** texName)
+{
+    *timIdx  = NO_VALUE;
+    *texName = "HERO";
+    switch (itemId)
+    {
+        case InvItemId_KitchenKnife: *modelIdx = FILE_ITEM_KNIFE_PLM;   break;
+        case InvItemId_SteelPipe:    *modelIdx = FILE_ITEM_PIPE_PLM;    *timIdx = FILE_ITEM_PIPE_TIM;   *texName = "PIPE";   break;
+        case InvItemId_Hammer:       *modelIdx = FILE_ITEM_HAMMER_PLM;  break;
+        case InvItemId_Axe:          *modelIdx = FILE_ITEM_AXE_PLM;     break;
+        case InvItemId_Handgun:      *modelIdx = FILE_ITEM_HANDGUN_PLM; break;
+        case InvItemId_HuntingRifle: *modelIdx = FILE_ITEM_RIFLE_PLM;   break;
+        case InvItemId_Shotgun:      *modelIdx = FILE_ITEM_SHOTGUN_PLM; break;
+        case InvItemId_Chainsaw:     *modelIdx = FILE_ITEM_CSAW_PLM;    *timIdx = FILE_ITEM_CSAW_TIM;   *texName = "CSAW";   break;
+        case InvItemId_HyperBlaster: *modelIdx = FILE_ITEM_HPRGUN_PLM;  *timIdx = FILE_ITEM_HPRGUN_TIM; *texName = "HPRGUN"; break;
+        case InvItemId_RockDrill:    *modelIdx = FILE_ITEM_DRILL_PLM;   *timIdx = FILE_ITEM_DRILL_TIM;  *texName = "DRILL";  break;
+        case InvItemId_Katana:       *modelIdx = FILE_ITEM_KATANA_PLM;  *timIdx = FILE_ITEM_KATANA_TIM; *texName = "KATANA"; break;
+        default:                     *modelIdx = NO_VALUE;              break;
+    }
+}
+
+static void VrHolster_Load(int widx)
+{
+    PcVrHolsterModel* h = &s_vrHolsterModels[widx];
+    const int         itemId = PcConfig_HolsterWeapon(widx);
+    s32               modelIdx, timIdx, size, pump = 0;
+    char*             texName;
+    s_LmHeader*       lmHdr;
+
+    VrHolster_Files(itemId, &modelIdx, &timIdx, &texName);
+    size = (modelIdx == NO_VALUE) ? 0 : Fs_GetFileSectorAlignedSize(modelIdx);
+    if (size <= 0 || (h->buf = (u8*)malloc(size + 4096)) == NULL)
+    {
+        h->failed = 1;
+        return;
+    }
+
+    if (timIdx == NO_VALUE)
+    {
+        /* Harry's own texture page, as the held item binds it */
+        h->desc.tPage[1] = 27;
+        h->desc.tPage[0] = 0;
+        h->desc.u        = 0;
+        h->desc.v        = 0;
+        h->desc.clutX    = 736;
+        h->desc.clutY    = 480;
+        Pc_PlayAs_HeldItemImageDesc(&h->desc);
+    }
+    else
+    {
+        const s32 slotId = VR_HOLSTER_TEX_SLOT_BASE + widx;
+        h->desc.tPage[0] = 0;
+        h->desc.tPage[1] = 28;   /* the GL override path keys off the clut word only */
+        h->desc.u        = 0;
+        h->desc.v        = 0;
+        h->desc.clutX    = (s16)((slotId % 64) * 16);
+        h->desc.clutY    = (s16)(HIRES_POOL_CLUT_ROW_BASE + (slotId / 64) * HIRES_POOL_MAX_ROWS);
+        HiresOverride_CharaPoolSlotReset(slotId);
+    }
+
+    Fs_QueueStartRead(modelIdx, h->buf);
+    if (timIdx != NO_VALUE)
+        Fs_QueueStartReadTim(timIdx, FS_BUFFER_1, &h->desc);
+    /* reads are synchronous on PC: pump the queue (pc_chara_pool.c) */
+    while (Fs_QueueGetLength() > 0 && pump++ < 100000)
+        Fs_QueueUpdate();
+
+    lmHdr = (s_LmHeader*)h->buf;
+    LmHeader_FixOffsets(lmHdr);
+    Lm_MaterialFsImageApply1(lmHdr, texName, &h->desc, BlendMode_Additive);
+    Lm_MaterialFlagsApply(lmHdr);
+    Bone_ModelAssign(&h->bone, lmHdr, 0);
+    h->ready = 1;
+    {
+        extern void VrOvr_Log(const char* fmt, ...);
+        VrOvr_Log("[VR-HOLSTER] weapon %d model loaded (%d bytes, texture %s)\n", itemId, (int)size, texName);
+    }
+}
+
+/* Game update: load the next holstered weapon still without its copy. */
+void Pc_VrHolsterModelsUpdate(void)
+{
+    extern int VrIk_HolsterSlotItem(int slot);
+    extern void VrWeaponHd_Update(void);
+    int k;
+    VrWeaponHd_Update();
+    for (k = 0; k < 6; k++)
+    {
+        const int w = VrHolster_WeaponIndex(VrIk_HolsterSlotItem(k));
+        if (w && !s_vrHolsterModels[w].ready && !s_vrHolsterModels[w].failed)
+        {
+            VrHolster_Load(w);
+            return;
+        }
+    }
+}
+
+/* Every slot's weapon: original while it is in the holster, all black while
+ * it is in the hand (the equipped weapon, drawn). */
+static void Pc_VrHolstersDraw(void)
+{
+    extern int VrIk_HolsterSlotItem(int slot);
+    extern int VrIk_HolsterSlotMatrix(int slot, MATRIX* out);
+    extern int VrInteract_HolsterState(void);
+    extern float g_PsyX_CharaFade;
+    static GsCOORDINATE2 s_slotCoord;
+    MATRIX worldMat, viewMat;
+    int    k;
+
+    { extern void VrWeaponHd_DebugShow(void); VrWeaponHd_DebugShow(); }   /* SH1VR_WPNHD_SHOW */
+    for (k = 0; k < 6; k++)
+    {
+        const int id = VrIk_HolsterSlotItem(k);
+        const int w  = VrHolster_WeaponIndex(id);
+        int       black;
+        if (!w || !s_vrHolsterModels[w].ready || !VrIk_HolsterSlotMatrix(k, &s_slotCoord.coord))
+            continue;
+        s_slotCoord.super = NULL;
+        s_slotCoord.flg   = 0;
+        black = (id == g_SavegamePtr->equippedWeapon && VrInteract_HolsterState() == 0);
+        {
+            /* [VR-HOLSTER] what each slot shows, when it changes */
+            static int s_shown[6] = { -1, -1, -1, -1, -1, -1 };
+            if (s_shown[k] != id * 2 + black)
+            {
+                extern void VrOvr_Log(const char* fmt, ...);
+                s_shown[k] = id * 2 + black;
+                VrOvr_Log("[VR-HOLSTER] slot %d: weapon %d %s\n", k, id, black ? "BLACK (in the hand)" : "original (holstered)");
+            }
+        }
+        {
+            /* the weapon's inventory close-up model (vr_weapon_hd.c) */
+            extern int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black);
+            extern float g_PsyX_CharaFade;
+            int drawn;
+            if (black) g_PsyX_CharaFade = 1.0f;
+            drawn = VrWeaponHd_Draw(id, &s_slotCoord, black);
+            if (black) g_PsyX_CharaFade = 0.0f;
+            if (drawn)
+                continue;
+        }
+        Vw_CoordToWorldAndViewMatrices(&s_slotCoord, &worldMat, &viewMat);
+        if (black)
+        {
+            /* no world tint, no light, no flashlight */
+            CVECTOR tint = g_WorldEnvWork.worldTintColor;
+            func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
+                          0, 0, 0, g_WorldEnvWork.screenBrightness);
+            g_PsyX_CharaFade = 1.0f;
+            func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
+            g_PsyX_CharaFade = 0.0f;
+            func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
+                          tint.r << 5, tint.g << 5, tint.b << 5, g_WorldEnvWork.screenBrightness);
+        }
+        else
+        {
+            func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
+        }
+    }
+}
+#endif
+
 void WorldGfx_HeldItemDraw(void) // 0x8003D058
 {
     MATRIX         viewMat;
@@ -1065,6 +1262,20 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
     GsCOORDINATE2* coord;
     s_HeldItem*    heldItem;
     s_LmHeader*    lmHdr;
+
+#ifdef SH_PC_PORT
+    {
+        /* held at the eye: per-vertex depth (PsyX_GPU.cpp g_PsyX_ActorVertexDepth),
+         * so a grip in the fist or the map between the fingers sorts per pixel;
+         * 2 = held item, which also draws down to the close near plane */
+        extern int g_PsyX_ActorVertexDepth;
+        g_PsyX_ActorVertexDepth = 2;
+        Pc_VrHolstersDraw();
+        { extern void Pc_MinimapVrSheetDraw(GsOT* ot); Pc_MinimapVrSheetDraw(&g_OrderingTable0[g_ActiveBufferIdx]); }
+        g_PsyX_ActorVertexDepth = 0;
+    }
+    { extern void VrCrosshair_Draw(GsOT* ot); VrCrosshair_Draw(&g_OrderingTable0[g_ActiveBufferIdx]); }
+#endif
 
     // Check if held item is valid.
     heldItem = &g_WorldGfxWork.heldItem;
@@ -1105,8 +1316,46 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
             Bone_ModelAssign(&heldItem->bone, heldItem->lmHdr, 0);
         }
 
+#ifdef SH_PC_PORT
+        /* VR holsters (Pc_VrHolstersDraw): holstered, the slot draws the
+         * weapon - none in the hand. In the hand it carries its VR Weapon
+         * Grip offset (vr_ik.c). */
+        {
+            extern int VrInteract_HolsterState(void);
+            extern int VrIk_HeldItemMatrix(MATRIX * out);
+            static GsCOORDINATE2 s_inHand;
+            MATRIX     hm;
+            const int  hs = (heldItem->itemId != InvItemId_CutscenePhone) ? VrInteract_HolsterState() : -1;
+
+            if (hs == 1)
+                return;
+            if (heldItem->itemId != InvItemId_CutscenePhone && VrIk_HeldItemMatrix(&hm))
+            {
+                s_inHand.coord = hm;
+                s_inHand.super = NULL;
+                s_inHand.flg   = 0;
+                coord = &s_inHand;
+            }
+        }
+#endif
+#ifdef SH_PC_PORT
+        /* the weapon's inventory close-up model in its place (vr_weapon_hd.c):
+         * on the VR hand's coordinate, or on Harry's hand bone outside
+         * first-person VR */
+        {
+            extern int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black);
+            if (VrWeaponHd_Draw(heldItem->itemId, coord, 0))
+                return;
+        }
+#endif
         Vw_CoordToWorldAndViewMatrices(coord, &worldMat, &viewMat);
+#ifdef SH_PC_PORT
+        { extern int g_PsyX_ActorVertexDepth; g_PsyX_ActorVertexDepth = (coord->super == NULL) ? 2 : 0; }   /* the VR grip */
+#endif
         func_80057090(&heldItem->bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
+#ifdef SH_PC_PORT
+        { extern int g_PsyX_ActorVertexDepth; g_PsyX_ActorVertexDepth = 0; }
+#endif
     }
 }
 
@@ -1682,6 +1931,15 @@ void func_8003DA9C(e_CharaId charaId, GsCOORDINATE2* boneCoords, s32 arg2, q3_12
      * pre-pass (monsters still cast). Set here (build time) so the GTE captures it
      * per-vertex; cleared right after. */
     { extern int g_PsyX_NoShadowCast; g_PsyX_NoShadowCast = (charaId == Chara_Harry) ? 1 : 0; }
+    /* First-person body: faces reaching the eye are back-face tested in view
+     * space (PsyX_GPU.cpp g_PsyX_BodyViewSpaceCull). Only while his head is
+     * hidden, i.e. the view is his own eyes. */
+    { extern int g_PsyX_BodyViewSpaceCull, g_PcHideHarryFpsBody;
+      g_PsyX_BodyViewSpaceCull = g_PcHideHarryFpsBody; }
+    /* ...and per-vertex depth, so the weapon, holsters and map held against it
+     * sort with its hands per pixel (PsyX_GPU.cpp g_PsyX_ActorVertexDepth) */
+    { extern int g_PsyX_ActorVertexDepth, g_PcHideHarryFpsBody;
+      g_PsyX_ActorVertexDepth = g_PcHideHarryFpsBody; }
     /* Hand the same fade the block above applied to this character's LIGHTING to
      * the per-pixel flashlight, which adds its light on top of the TEXTURE and so
      * would otherwise relight a character the game has already faded to nothing.
@@ -1704,6 +1962,8 @@ void func_8003DA9C(e_CharaId charaId, GsCOORDINATE2* boneCoords, s32 arg2, q3_12
 #ifdef SH_PC_PORT
     { extern int g_PcCharaPrimProbeActive; g_PcCharaPrimProbeActive = 0; }
     { extern int g_PcHideHarryFpsBody; g_PcHideHarryFpsBody = 0; }
+    { extern int g_PsyX_BodyViewSpaceCull; g_PsyX_BodyViewSpaceCull = 0; }
+    { extern int g_PsyX_ActorVertexDepth; g_PsyX_ActorVertexDepth = 0; }
     { extern int g_PsyX_NoShadowCast; g_PsyX_NoShadowCast = 0; }
     { extern float g_PsyX_CharaFade; g_PsyX_CharaFade = 0.0f; }
 #endif

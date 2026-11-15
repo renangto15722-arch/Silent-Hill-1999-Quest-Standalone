@@ -85,13 +85,13 @@ echo   [6]  Nuke + rebuild         ^(wipe build dir, keep gamedata/save/config^)
 echo   [Q]  Quit
 echo.
 choice /c 123456Q /n /m "Pick an option: "
-set "RC=%ERRORLEVEL%"
-if "%RC%"=="1" ( set "MODE=build"       & goto dispatch )
-if "%RC%"=="2" ( set "MODE=rebuild"     & goto dispatch )
-if "%RC%"=="3" ( set "MODE=run"         & goto dispatch )
-if "%RC%"=="4" ( set "MODE=runonly"     & goto dispatch )
-if "%RC%"=="5" ( set "MODE=configure"   & goto dispatch )
-if "%RC%"=="6" ( set "MODE=nuke"        & goto dispatch )
+set "MENU=%ERRORLEVEL%"
+if "%MENU%"=="1" ( set "MODE=build"       & goto dispatch )
+if "%MENU%"=="2" ( set "MODE=rebuild"     & goto dispatch )
+if "%MENU%"=="3" ( set "MODE=run"         & goto dispatch )
+if "%MENU%"=="4" ( set "MODE=runonly"     & goto dispatch )
+if "%MENU%"=="5" ( set "MODE=configure"   & goto dispatch )
+if "%MENU%"=="6" ( set "MODE=nuke"        & goto dispatch )
 goto end
 
 :dispatch

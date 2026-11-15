@@ -64,6 +64,14 @@ void Vw_SetLookAtMatrix(const VECTOR3* pos, const VECTOR3* lookAt) // 0x80048AF4
     viewMat.t[0] = Q12_TO_Q8(pos->vx);
     viewMat.t[1] = Q12_TO_Q8(pos->vy);
     viewMat.t[2] = Q12_TO_Q8(pos->vz);
+#ifdef SH_PC_PORT
+    {
+        /* the PC cameras (first person included) come through here: keep the
+         * fraction the Q12 -> Q8 truncation drops (vw_calc.c exact camera) */
+        extern void Vw_PcCamSourceSet(const MATRIX* camMat, const VECTOR3* posQ12);
+        Vw_PcCamSourceSet(&viewMat, pos);
+    }
+#endif
     vwSetViewInfoDirectMatrix(NULL, &viewMat);
 }
 
@@ -98,6 +106,19 @@ void vwSetViewInfoDirectMatrix(GsCOORDINATE2* pcoord, const MATRIX* cammat) // 0
     vwViewPointInfo.vwcoord.flg   = false;
     vwViewPointInfo.vwcoord.super = pcoord;
     vwViewPointInfo.vwcoord.coord = *cammat;
+
+#ifdef SH_PC_PORT
+    /* the exact view matrices (vw_calc.c): this camera's dropped fraction */
+    {
+        extern void Vw_PcCamViewSet(const MATRIX* camMat, s32 parented);
+        Vw_PcCamViewSet(cammat, pcoord != NULL);
+    }
+    /* VR positional head tracking (see pc_port/src/vr_tracking.c) */
+    {
+        extern void VrApplyHeadOffset(MATRIX* camMat);
+        VrApplyHeadOffset(&vwViewPointInfo.vwcoord.coord);
+    }
+#endif
 }
 
 /** @brief Extracts a position from a matrix, outputting the result to `pos`.

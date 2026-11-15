@@ -6,6 +6,10 @@
 #include "bodyprog/screen/screen_data.h"
 #include "bodyprog/screen/screen_draw.h"
 #include "main/fsqueue.h"
+#ifdef SH_PC_PORT
+#include "pc_config.h"
+#include "pc_wide_lm.h"
+#endif
 
 s8* D_800C15B0;
 
@@ -262,6 +266,11 @@ static int g_BoneLogFrames = 0;
  * upper-arms) that would clip into the eye. Scoped to that one draw — NPC
  * skeletons (different bone indices) are untouched. */
 int g_PcHideHarryFpsBody = 0;
+/* First-person VR (the GTA SA VR hands replace Harry's, vr_hands.c): set
+ * around every bone's draw. The vertices are still transformed - parts weld
+ * onto each other through vertexOffset - but no primitive is emitted
+ * (func_8005AC50, Gfx_MeshDraw, func_80059E34). */
+int g_PcSkipMeshPrims = 0;
 #endif
 
 #ifdef SH_PC_PORT
@@ -439,7 +448,20 @@ void func_80045534(s_Skeleton* skel, GsOT* ot, s32 arg2, GsCOORDINATE2* boneCoor
                 int _hb = (u8)curBone->bone.idx;
                 if (!(g_PcHideHarryFpsBody && (_hb == 2 || _hb >= 18)))
                 {
-                    func_80057090(&curBone->bone.modelInfo, ot, arg2, &viewMat, &worldMat, arg5);
+                    /* first-person VR: Harry is not drawn at all (the VR
+                     * hands are yours); every bone transforms without drawing */
+                    extern int VrIk_HandsActive(void);
+                    int _hide = g_PcHideHarryFpsBody && VrIk_HandsActive();
+                    if (_hide && Pc_WideLm_IsWide(curBone->bone.modelInfo.modelHdr))
+                    {
+                        /* the v7 drawer welds from its own part data */
+                    }
+                    else
+                    {
+                        g_PcSkipMeshPrims = _hide;
+                        func_80057090(&curBone->bone.modelInfo, ot, arg2, &viewMat, &worldMat, arg5);
+                        g_PcSkipMeshPrims = 0;
+                    }
                 }
             }
 #else

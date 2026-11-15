@@ -1077,6 +1077,13 @@ void Player_Update(s_SubCharacter* player, s_AnmHeader* anmHdr, GsCOORDINATE2* c
         extern void Pc_PlayAs_PlayerAnimTick(void);
         Pc_PlayAs_PlayerAnimTick();
     }
+
+    /* VR IK body: the arms reach for the motion controllers. Last of the
+     * frame's arm poses, before the all-bones flg reset (pc_port/src/vr_ik.c). */
+    {
+        extern void VrIk_ApplyArms(GsCOORDINATE2* coords);
+        VrIk_ApplyArms(coords);
+    }
 #endif
 
     D_800C45B0.vx = 0;
@@ -2015,7 +2022,11 @@ void Player_LogicUpdate(s_SubCharacter* player, s_PlayerExtra* extra, GsCOORDINA
                      * you move (the snap below resumes on any move input or while
                      * aiming). TPS/OTS (non-FPS) always snap. */
                     int fpsIdleLook = 0;
-                    if (g_PcFpsCam && !g_SysWork.playerCombat.isAiming)
+                    /* VR: the headset is the free look - the base yaw only moves
+                     * when the body should (stick, or Body_Turning_Deadzone in
+                     * pc_port/src/vr_tracking.c), so the body always follows it. */
+                    extern int VrTracking_HeadCamActive(void);
+                    if (g_PcFpsCam && !g_SysWork.playerCombat.isAiming && !VrTracking_HeadCamActive())
                     {
                         s32 held   = g_Controller0->heldBtnFlags;
                         int moveIn = (g_sdlKeyboardState[SDL_SCANCODE_W] != 0) ||
@@ -2115,6 +2126,15 @@ void Player_LogicUpdate(s_SubCharacter* player, s_PlayerExtra* extra, GsCOORDINA
                             heading = (mX > 0) ? Q12_ANGLE(45.0f) : -Q12_ANGLE(45.0f);
                             if (mZ < 0) heading = -heading;   /* backward flips the strafe side (D is negative) */
                         }
+#ifdef SH_PC_PORT
+                        /* VR Walk_Direction = Head: travel along the headset's
+                         * yaw - its angle off the body joins the offset, the
+                         * way the diagonal above turns it (vr_tracking.c) */
+                        if (mZ != 0 || mX != 0) {
+                            extern int VrTracking_MoveYawOffset(void);
+                            heading = Math_AngleNormalizeSigned(heading + VrTracking_MoveYawOffset());
+                        }
+#endif
                         g_Player_HeadingAngle = heading;
                         g_SysWork.playerWork.player.properties.player.headingAngle = heading;
                     }
@@ -10973,16 +10993,35 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                 extern VECTOR3 g_TpsCamPos;
                 extern VECTOR3 g_TpsCamFwd;
                 extern s32     g_TpsCamPitch;
+                /* VR: the shot leaves the gun in the right hand, along the
+                 * controller's pointing ray (vr_ik.c), not the view centre. */
+                extern int     VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd);
+                VECTOR3        _rayPos = g_TpsCamPos;
+                VECTOR3        _rayFwd = g_TpsCamFwd;
                 s_RayTrace _tr;
                 VECTOR3    _off, _P;
                 VECTOR3*   _hand = &playerCombat.attackPosition;
                 s32        _pitch;
+                const int      _vrGun = VrIk_GetGunRay(&_rayPos, &_rayFwd);   /* unchanged without a VR gun */
                 #define SH_AIM_RANGE Q12(60.0f)
-                _off.vx = (s32)(((s64)g_TpsCamFwd.vx * SH_AIM_RANGE) >> 12);
-                _off.vy = (s32)(((s64)g_TpsCamFwd.vy * SH_AIM_RANGE) >> 12);
-                _off.vz = (s32)(((s64)g_TpsCamFwd.vz * SH_AIM_RANGE) >> 12);
+                _off.vx = (s32)(((s64)_rayFwd.vx * SH_AIM_RANGE) >> 12);
+                _off.vy = (s32)(((s64)_rayFwd.vy * SH_AIM_RANGE) >> 12);
+                _off.vz = (s32)(((s64)_rayFwd.vz * SH_AIM_RANGE) >> 12);
                 #undef SH_AIM_RANGE
-                if (Ray_CharaTraceQuery(&_tr, &g_TpsCamPos, &_off, player))
+                if (_vrGun)
+                {
+                    /* VR: the point the crosshair dot shows (vr_crosshair.c). The
+                     * trace below is 2D, so its target Y is not on the ray: a shot
+                     * aimed at it climbed or dropped off the dot. */
+                    extern int VrGun_AimPoint(const VECTOR3* from, const VECTOR3* fwd, float rangeM,
+                                              VECTOR3* out, float* distM);
+                    VrGun_AimPoint(&_rayPos, &_rayFwd, 60.0f, &_P, NULL);
+                    /* and the shot leaves the VR gun's muzzle (vr_aim_*), not
+                     * Harry's animated hand: the bullet then runs down the very
+                     * ray the dot sits on */
+                    *_hand = _rayPos;
+                }
+                else if (Ray_CharaTraceQuery(&_tr, &_rayPos, &_off, player))
                 {
                     _P = _tr.target;
                 }
@@ -10999,10 +11038,10 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                      * with the endpoint, so it is always the correct aim point. */
                     s_RayTrace _wtr;
                     VECTOR3    _end;
-                    _end.vx = g_TpsCamPos.vx + _off.vx;
-                    _end.vy = g_TpsCamPos.vy + _off.vy;
-                    _end.vz = g_TpsCamPos.vz + _off.vz;
-                    Ray_TraceQuery(&_wtr, &g_TpsCamPos, &_end);
+                    _end.vx = _rayPos.vx + _off.vx;
+                    _end.vy = _rayPos.vy + _off.vy;
+                    _end.vz = _rayPos.vz + _off.vz;
+                    Ray_TraceQuery(&_wtr, &_rayPos, &_end);
                     _P = _wtr.target;
                 }
                 /* Aim assist: if the reticle is over (mouse) or near (controller
@@ -11015,7 +11054,7 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                 {
                     extern s32 Pc_AimAssistFind(const VECTOR3*, const VECTOR3*, s32, VECTOR3*);
                     VECTOR3 _aim;
-                    if (Pc_AimAssistFind(&g_TpsCamPos, &g_TpsCamFwd, Q12(60.0f), &_aim) != NO_VALUE)
+                    if (Pc_AimAssistFind(&_rayPos, &_rayFwd, Q12(60.0f), &_aim) != NO_VALUE)
                     {
                         _P = _aim;
                     }

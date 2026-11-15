@@ -759,6 +759,8 @@ void Game_NpcUpdate(void) // 0x80038354
 #ifdef SH_PC_PORT
                         Pc_Pick_CharaPreDraw(npc, (int)(npc - g_SysWork.npcs),
                                              g_CharaModelAnimsData[animDataInfoIdx].boneCoords);
+                        { extern void Vw_PcExactRootFromPos(const GsCOORDINATE2*, const VECTOR3*);
+                          Vw_PcExactRootFromPos(statueBc, &npc->position); }
 #endif
                         func_8003DA9C(npc->model.charaId,
                                       g_CharaModelAnimsData[animDataInfoIdx].boneCoords,
@@ -880,6 +882,9 @@ void Game_NpcUpdate(void) // 0x80038354
             {
 #ifdef SH_PC_PORT
                 Pc_Pick_CharaPreDraw(npc, (int)(npc - g_SysWork.npcs), boneCoords);
+                /* the root's spot before the Q12 -> Q8 cut, for PGXP */
+                { extern void Vw_PcExactRootFromPos(const GsCOORDINATE2*, const VECTOR3*);
+                  Vw_PcExactRootFromPos(&boneCoords[0], &npc->position); }
 #endif
                 func_8003DA9C(npc->model.charaId, boneCoords, 1, npc->timer_C6, (s8)npc->model.paletteIdx);
             }

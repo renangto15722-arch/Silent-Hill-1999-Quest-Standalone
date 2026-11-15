@@ -24,6 +24,13 @@
  * injects its motion + click into g_Controller0. */
 void Pc_MouseCursor_FrameUpdate(void);
 
+/* VR pointer (vr_full.c, every frame): on = a menu panel is open in the
+ * headset; inView = the right controller's ray hits it at (vx, vy), a
+ * fraction of the picture, top-left origin; left/right = trigger/grip.
+ * While on it replaces the OS mouse for every consumer below. */
+void Pc_MouseCursor_SetVr(int on, int inView, float vx, float vy, int left, int right);
+int  Pc_MouseCursor_VrActive(void);
+
 /* Called from Gfx_CursorDraw: a cursor-driven puzzle drew its cursor this frame
  * at (curX, curY) in framebuffer centre-origin pixels. Arms the puzzle mouse
  * servo for the next few frames and records the cursor position so the servo can

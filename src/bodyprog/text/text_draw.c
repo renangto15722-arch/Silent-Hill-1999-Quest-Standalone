@@ -25,6 +25,17 @@
 #endif
 
 #ifdef SH_PC_PORT
+/* ~H asks for hi-res glyphs, laid out for the 480-line screen of the stock
+ * take screens. A VR world pickup asks its question over the live 240-line
+ * world (events_util.c Event_ItemTake), where they would land below it. */
+static bool Pc_MsgHighResAllowed(void)
+{
+    extern int Pc_VrPickupsInWorld(void);
+    return g_GameWork.gsScreenHeight == FRAMEBUFFER_HEIGHT_INTERLACED || !Pc_VrPickupsInWorld();
+}
+#endif
+
+#ifdef SH_PC_PORT
 /* Page continuation state (see text_draw.h). Offsets are into `s_PageMsg`, so a
  * message re-examined later starts from the top: the pointer is re-latched below
  * whenever a different message is drawn, and Gfx_MapMsg_Draw resets on setup. */
@@ -46,6 +57,15 @@ static s32 g_Strings2dLayerIdx = 6;
  * the 240-line Y it grows from. 1.0 leaves every glyph on the original path. */
 static s32         s_MsgScale = Q12(1.0f);
 static s32         s_MsgAnchorY;
+
+/* VR subtitle scale: applied at glyph EMISSION on center-origin coords.
+ * Expects a local `vrQ8` (256 = identity) in the enclosing function. */
+#define VRS(v) (((v) * vrQ8) >> 8)
+/* Y with scale + toward-center lift (center-origin, +Y down): bottom
+ * text lifts UP, top text drops DOWN. Expects locals vrQ8, vrLift. */
+#define VRSY(v) (VRS(v) > 0 ? VRS(v) - vrLift : (VRS(v) < 0 ? VRS(v) + vrLift : 0))
+/* The SPRT path is a fixed-size blit, so a VR scale forces the poly path. */
+#define VR_GLYPH_HIRES (g_SysWork.enableHighResGlyphs || vrQ8 != 256)
 
 /* One scaled message glyph. The layout is still computed at 1x; each glyph is
  * then mapped about (0, s_MsgAnchorY), which scales its size, the advance and
@@ -168,6 +188,10 @@ static s32 Pc_MapMsgPageBreak(const char* base, const char* at, s16 colorId, s32
     s_PageAlign   = align;
     return 1;
 }
+#endif
+
+#ifndef SH_PC_PORT
+#define VR_GLYPH_HIRES g_SysWork.enableHighResGlyphs
 #endif
 
 #ifndef PAD_HACK_IGNORE
@@ -302,6 +326,10 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
     DR_TPAGE* tPage;
     POLY_FT4* glyphPoly;
     SPRT*     glyphSprt;
+#ifdef SH_PC_PORT
+    s32       vrQ8;
+    s32       vrLift;
+#endif
 
     // Create local argument copies.
 #ifdef SH_PC_PORT
@@ -321,10 +349,26 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
     posX = g_StringPosition.vx;
     posY = g_StringPosition.vy;
 
+#ifdef SH_PC_PORT
+    /* VR subtitle scale (roadmap item 1): coordinates are CENTER-ORIGIN,
+     * so scaling emitted positions shrinks the whole text block toward
+     * screen center - glyph size, advances, AND line pitch scale together
+     * coherently (positions accumulate unscaled; scaling happens only at
+     * emission). 256 = off; policy in vr_tracking.c (FULL + cutscene
+     * only). Hi-res poly path only - the SPRT path is a fixed-size blit
+     * and cannot scale. VRS() below uses this local. */
+    {
+        extern int VrTracking_SubtitleScaleQ8(void);
+        extern int VrTracking_SubtitleLiftY(void);
+        vrQ8   = VrTracking_SubtitleScaleQ8();
+        vrLift = VrTracking_SubtitleLiftY();
+    }
+#endif
+
     glyphColor = STRING_COLORS[g_StringColorId];
     ot         = &g_OtTags0[g_ActiveBufferIdx][g_Strings2dLayerIdx];
 
-    if (!g_SysWork.enableHighResGlyphs)
+    if (!VR_GLYPH_HIRES)
     {
         packet = GsOUT_PACKET_P;
     }
@@ -375,17 +419,17 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
 
             if (Pc_KanjiCell((u16)(((u32)charCode << 8) | strCpy[1]), &kPage, &kU, &kV, &kClut))
             {
-                if (g_SysWork.enableHighResGlyphs)
+                if (VR_GLYPH_HIRES)
                 {
                     glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
                     setPolyFT4(glyphPoly);
                     setRGB0(glyphPoly, glyphColor, glyphColor >> 8, glyphColor >> 16);
                     setXY4(glyphPoly,
-                           posX,                           posY * 2,
-                           posX,                           (posY * 2) + g_FontLayout->hiResGlyphBottom,
-                           posX + FONT_12X16_GLYPH_SIZE_X, posY * 2,
-                           posX + FONT_12X16_GLYPH_SIZE_X, (posY * 2) + g_FontLayout->hiResGlyphBottom);
+                           VRS(posX),                           VRSY(posY) * 2,
+                           VRS(posX),                           (VRSY(posY) * 2) + VRS(g_FontLayout->hiResGlyphBottom),
+                           VRS(posX + FONT_12X16_GLYPH_SIZE_X), VRSY(posY) * 2,
+                           VRS(posX + FONT_12X16_GLYPH_SIZE_X), (VRSY(posY) * 2) + VRS(g_FontLayout->hiResGlyphBottom));
 
                     *((u32*)&glyphPoly->u0) = (u32)kU + ((u32)kV << 8) + ((u32)kClut << 16);
                     *((u32*)&glyphPoly->u1) = (u32)kU + (kPage << 16) + (((u32)kV + 15) << 8);
@@ -456,17 +500,17 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
                 u0         = (glyphIdx % FONT_12X16_ATLAS_COLUMN_COUNT) * FONT_12X16_GLYPH_SIZE_X;
 
                 // Draw glyph sprite.
-                if (g_SysWork.enableHighResGlyphs)
+                if (VR_GLYPH_HIRES)
                 {
                     glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
                     setPolyFT4(glyphPoly);
                     setRGB0(glyphPoly, glyphColor, glyphColor >> 8, glyphColor >> 16);
                     setXY4(glyphPoly,
-                           posX,                           drawY * 2,
-                           posX,                           (drawY * 2) + g_FontLayout->hiResGlyphBottom,
-                           posX + FONT_12X16_GLYPH_SIZE_X, drawY * 2,
-                           posX + FONT_12X16_GLYPH_SIZE_X, (drawY * 2) + g_FontLayout->hiResGlyphBottom);
+                           VRS(posX),                           VRSY(drawY) * 2,
+                           VRS(posX),                           (VRSY(drawY) * 2) + VRS(g_FontLayout->hiResGlyphBottom),
+                           VRS(posX + FONT_12X16_GLYPH_SIZE_X), VRSY(drawY) * 2,
+                           VRS(posX + FONT_12X16_GLYPH_SIZE_X), (VRSY(drawY) * 2) + VRS(g_FontLayout->hiResGlyphBottom));
 
                     *((u32*)&glyphPoly->u0) = u0 + (vTop << 8) + (g_FontLayout->packedClut << 16); // `u0`, `v0`, `clut`.
                     *((u32*)&glyphPoly->u1) = u0 + (page << 16) + ((vTop + 15) << 8);              // `u1`, `v1`, `page`.
@@ -506,7 +550,7 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
             sizeCpy--;
 
             // Draw glyph sprite.
-            if (g_SysWork.enableHighResGlyphs)
+            if (VR_GLYPH_HIRES)
             {
                 glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
@@ -582,7 +626,7 @@ bool Gfx_StringDraw(char* str, s32 strLength) // 0x8004A8E8
         strCpy++;
     }
 
-    if (!g_SysWork.enableHighResGlyphs)
+    if (!VR_GLYPH_HIRES)
     {
         GsOUT_PACKET_P = packet;
     }
@@ -681,6 +725,10 @@ s32 Gfx_MapMsg_CalculateWidths(s32 mapMsgIdx) // 0x8004ACF4
                         break;
 
                     case MAP_MSG_CODE_HIGH_RES:
+#ifdef SH_PC_PORT
+                        if (!Pc_MsgHighResAllowed())
+                            break;
+#endif
                         g_SysWork.enableHighResGlyphs = true;
                         break;
                 }
@@ -786,6 +834,8 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
     char*     pcPageBase;
     bool      pcTerminated;
     bool      pcBudgetMax;
+    s32       vrQ8;
+    s32       vrLift;
 #endif
 
     packet = NULL;
@@ -816,13 +866,27 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
      * further than it does on this frame — a page that still has text left at
      * that point has to break here or it never ends. */
     pcBudgetMax = (strLength >= MAP_MESSAGE_DISPLAY_ALL_LENGTH);
+
+    /* VR subtitle scale (roadmap item 1): coordinates are CENTER-ORIGIN,
+     * so scaling emitted positions shrinks the whole text block toward
+     * screen center - glyph size, advances, AND line pitch scale together
+     * coherently (positions accumulate unscaled; scaling happens only at
+     * emission). 256 = off; policy in vr_tracking.c (FULL + cutscene
+     * only). Hi-res poly path only - the SPRT path is a fixed-size blit
+     * and cannot scale. VRS() below uses this local. */
+    {
+        extern int VrTracking_SubtitleScaleQ8(void);
+        extern int VrTracking_SubtitleLiftY(void);
+        vrQ8   = VrTracking_SubtitleScaleQ8();
+        vrLift = VrTracking_SubtitleLiftY();
+    }
 #endif
 
     ot                  = (GsOT*)&g_OtTags0[g_ActiveBufferIdx][6];
     color               = STRING_COLORS[g_StringColorId];
     g_StringPosition.vx = -(g_MapMsg_Widths[0] >> 1);
 
-    if (!g_SysWork.enableHighResGlyphs)
+    if (!VR_GLYPH_HIRES)
     {
         packet = GsOUT_PACKET_P;
     }
@@ -1075,6 +1139,10 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
 #endif
 
                     case MAP_MSG_CODE_HIGH_RES:
+#ifdef SH_PC_PORT
+                        if (!Pc_MsgHighResAllowed())
+                            break;
+#endif
                         g_SysWork.enableHighResGlyphs = true;
                         break;
             }
@@ -1108,22 +1176,22 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
                 if (Pc_KanjiCell((u16)(((u32)(u8)charCode << 8) | ((u8*)mapMsg)[1]),
                                  &kPage, &kU, &kV, &kClut))
                 {
-                    if (s_MsgScale != Q12(1.0f))
+                    if (s_MsgScale != Q12(1.0f) && vrQ8 == 256)
                     {
                         Pc_MsgGlyphQuad(ot, &packet, glyphPosX, glyphPosY,
                                         (u32)kU, (u32)kV, (u32)kClut, kPage, color);
                     }
-                    else if (g_SysWork.enableHighResGlyphs)
+                    else if (VR_GLYPH_HIRES)
                     {
                         glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
                         setPolyFT4(glyphPoly);
                         setRGB0(glyphPoly, (s8)color, (s8)(color >> 8), (s8)(color >> 16));
                         setXY4(glyphPoly,
-                               glyphPosX,                           glyphPosY * 2,
-                               glyphPosX,                           (glyphPosY * 2) + g_FontLayout->hiResGlyphBottom,
-                               glyphPosX + FONT_12X16_GLYPH_SIZE_X, glyphPosY * 2,
-                               glyphPosX + FONT_12X16_GLYPH_SIZE_X, (glyphPosY * 2) + g_FontLayout->hiResGlyphBottom);
+                               VRS(glyphPosX),                           VRSY(glyphPosY) * 2,
+                               VRS(glyphPosX),                           (VRSY(glyphPosY) * 2) + VRS(g_FontLayout->hiResGlyphBottom),
+                               VRS(glyphPosX + FONT_12X16_GLYPH_SIZE_X), VRSY(glyphPosY) * 2,
+                               VRS(glyphPosX + FONT_12X16_GLYPH_SIZE_X), (VRSY(glyphPosY) * 2) + VRS(g_FontLayout->hiResGlyphBottom));
 
                         *((u32*)&glyphPoly->u0) = (u32)kU + ((u32)kV << 8) + ((u32)kClut << 16);
                         *((u32*)&glyphPoly->u1) = (u32)kU + (kPage << 16) + (((u32)kV + 15) << 8);
@@ -1165,7 +1233,7 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
                     }
 #endif
 
-                    if (!g_SysWork.enableHighResGlyphs)
+                    if (!VR_GLYPH_HIRES)
                     {
                         GsOUT_PACKET_P = packet;
                     }
@@ -1200,22 +1268,22 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
                     page      = g_FontLayout->tpageBase + (row / g_FontLayout->rowsPerPage);
                     temp_a0   = (idx % FONT_12X16_ATLAS_COLUMN_COUNT) * FONT_12X16_GLYPH_SIZE_X;
 
-                    if (s_MsgScale != Q12(1.0f))
+                    if (s_MsgScale != Q12(1.0f) && vrQ8 == 256)
                     {
                         Pc_MsgGlyphQuad(ot, &packet, glyphPosX, drawY, (u32)temp_a0, (u32)vTop,
                                         (u32)g_FontLayout->packedClut, page, color);
                     }
-                    else if (g_SysWork.enableHighResGlyphs)
+                    else if (VR_GLYPH_HIRES)
                     {
                         glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
                         setPolyFT4(glyphPoly);
                         setRGB0(glyphPoly, (s8)color, (s8)(color >> 8), (s8)(color >> 16));
                         setXY4(glyphPoly,
-                               glyphPosX,                           drawY * 2,
-                               glyphPosX,                           (drawY * 2) + g_FontLayout->hiResGlyphBottom,
-                               glyphPosX + FONT_12X16_GLYPH_SIZE_X, drawY * 2,
-                               glyphPosX + FONT_12X16_GLYPH_SIZE_X, (drawY * 2) + g_FontLayout->hiResGlyphBottom);
+                               VRS(glyphPosX),                           VRSY(drawY) * 2,
+                               VRS(glyphPosX),                           (VRSY(drawY) * 2) + VRS(g_FontLayout->hiResGlyphBottom),
+                               VRS(glyphPosX + FONT_12X16_GLYPH_SIZE_X), VRSY(drawY) * 2,
+                               VRS(glyphPosX + FONT_12X16_GLYPH_SIZE_X), (VRSY(drawY) * 2) + VRS(g_FontLayout->hiResGlyphBottom));
 
                         *((u32*)&glyphPoly->u0) = temp_a0 + (vTop << 8) + (g_FontLayout->packedClut << 16);      // `u0`, `v0`, `clut`.
                         *((u32*)&glyphPoly->u1) = temp_a0 + (page << 16) + ((vTop + 15) << 8);                   // `u1`, `v1`, `page`.
@@ -1250,7 +1318,7 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
                 }
             }
 #else
-            if (g_SysWork.enableHighResGlyphs)
+            if (VR_GLYPH_HIRES)
             {
                 glyphPoly = (POLY_FT4*)GsOUT_PACKET_P;
 
@@ -1314,7 +1382,7 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
                 }
 #endif
 
-                if (!g_SysWork.enableHighResGlyphs)
+                if (!VR_GLYPH_HIRES)
                 {
                     GsOUT_PACKET_P = packet;
                 }
@@ -1335,7 +1403,7 @@ s32 Gfx_MapMsg_StringDraw(char* mapMsg, s32 strLength) // 0x8004AF18
     }
 #endif
 
-    if (!g_SysWork.enableHighResGlyphs)
+    if (!VR_GLYPH_HIRES)
     {
         GsOUT_PACKET_P = packet;
     }

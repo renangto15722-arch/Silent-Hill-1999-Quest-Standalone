@@ -302,6 +302,18 @@ void Pc_ConsoleApplyPendingFlags(void)
         if (s_pendingFlags[i].val) Savegame_EventFlagSet(s_pendingFlags[i].flag);
         else                       Savegame_EventFlagClear(s_pendingFlags[i].flag);
     }
+    /* SH1VR_FLAGS="39,40" (test runs, K:\sh1vr\xrsim64): event flags set on the
+     * fresh savegame - e.g. the cafe's opening FMV and cutscene as seen, so a
+     * -skiptogame New Game at map0_s01 starts in play. */
+    {
+        const char* e = getenv("SH1VR_FLAGS");
+        while (e && *e) {
+            int n = atoi(e);
+            if (n >= 0 && n < 52 * 32) Savegame_EventFlagSet(n);
+            while (*e && *e != ',') e++;
+            if (*e == ',') e++;
+        }
+    }
 }
 
 /* The SH1 ending is selected from two binary flags read by the map7_s03 ending

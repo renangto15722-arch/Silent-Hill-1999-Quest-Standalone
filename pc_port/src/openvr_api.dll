@@ -1,0 +1,306 @@
+/*
+=============================================================================
+ SH1 PC Port - IN-PROCESS OPENVR  (Stage 1: poses, Stage 2: floating screen)
+=============================================================================
+
+ EXPERIMENTAL - first build of the native OpenVR path.
+
+ INSTALL:
+ 1. OpenVR SDK (github.com/ValveSoftware/openvr):
+      headers/openvr_capi.h   -> pc_port/include/openvr_capi.h
+      bin/win64/openvr_api.dll -> next to SilentHillPC.exe
+ 2. This file -> pc_port/src/vr_openvr.c
+ 3. Hook in pc_port/src/main_pc.c, immediately BEFORE the PsyX_EndScene call:
+        { extern void VrOvr_EndFrame(void); VrOvr_EndFrame(); }
+
+ BEHAVIOR:
+ - openvr_api.dll missing or no HMD -> everything silently no-ops;
+   the game runs exactly as before. Zero risk install.
+ - NUMPAD 9 toggles the floating screen (game view inside the headset).
+ - NUMPAD * / NUMPAD / grow/shrink the screen.
+ - Poses: set environment variable SH1VR_OPENVR_POSES=1 to feed head
+   tracking from here instead of the Python bridge file (OFF by default
+   until axis conventions are verified against the tuned bridge).
+
+ This file deliberately includes NO decomp headers (windows.h lives here;
+ the 'byte' typedef clash stays impossible).
+=============================================================================
+*/
+
+#include <windows.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#include <SDL.h>
+#include <SDL_opengl.h>
+
+/* Official Valve C API header - correct ABI guaranteed. */
+#include "openvr_capi.h"
+
+/* ---- dynamic OpenVR loading -------------------------------------------- */
+
+typedef intptr_t (*PFN_VR_InitInternal)(EVRInitError* err, EVRApplicationType type);
+typedef void     (*PFN_VR_ShutdownInternal)(void);
+typedef intptr_t (*PFN_VR_GetGenericInterface)(const char* name, EVRInitError* err);
+typedef int      (*PFN_VR_IsHmdPresent)(void);
+
+static HMODULE s_dll = NULL;
+static PFN_VR_InitInternal        p_Init = NULL;
+static PFN_VR_ShutdownInternal    p_Shutdown = NULL;
+static PFN_VR_GetGenericInterface p_GetIface = NULL;
+static PFN_VR_IsHmdPresent        p_HmdPresent = NULL;
+
+static struct VR_IVRSystem_FnTable*  s_sys = NULL;
+static struct VR_IVROverlay_FnTable* s_ovl = NULL;
+
+static int s_vrReady   = 0;
+static int s_triedInit = 0;
+
+/* ---- floating screen state ---------------------------------------------- */
+
+static VROverlayHandle_t s_screen = 0;
+static int    s_screenVisible = 0;
+static float  s_screenWidth   = 2.5f;   /* meters */
+static GLuint s_frameTex      = 0;
+static int    s_texW = 0, s_texH = 0;
+
+/* ---- pose state ---------------------------------------------------------- */
+
+static int   s_usePoses = 0;   /* SH1VR_OPENVR_POSES=1 */
+static int   s_havePose = 0;
+static float s_pos[3]   = {0, 0, 0};
+static float s_rot[3]   = {0, 0, 0}; /* pitch, yaw, roll */
+
+/* ------------------------------------------------------------------------- */
+
+static void VrOvr_TryInit(void)
+{
+    if (s_triedInit) return;
+    s_triedInit = 1;
+
+    const char* env = getenv("SH1VR_OPENVR_POSES");
+    s_usePoses = (env != NULL && env[0] == '1');
+
+    s_dll = LoadLibraryA("openvr_api.dll");
+    if (!s_dll)
+    {
+        printf("[VR-OVR] openvr_api.dll not found - HMD screen disabled\n");
+        return;
+    }
+
+    p_Init       = (PFN_VR_InitInternal)GetProcAddress(s_dll, "VR_InitInternal");
+    p_Shutdown   = (PFN_VR_ShutdownInternal)GetProcAddress(s_dll, "VR_ShutdownInternal");
+    p_GetIface   = (PFN_VR_GetGenericInterface)GetProcAddress(s_dll, "VR_GetGenericInterface");
+    p_HmdPresent = (PFN_VR_IsHmdPresent)GetProcAddress(s_dll, "VR_IsHmdPresent");
+
+    if (!p_Init || !p_Shutdown || !p_GetIface)
+    {
+        printf("[VR-OVR] openvr_api.dll exports missing\n");
+        return;
+    }
+
+    if (p_HmdPresent && !p_HmdPresent())
+    {
+        printf("[VR-OVR] no HMD present - HMD screen disabled\n");
+        return;
+    }
+
+    EVRInitError err = EVRInitError_VRInitError_None;
+    /* Overlay app type: coexists with any running VR scene, low friction */
+    p_Init(&err, EVRApplicationType_VRApplication_Overlay);
+    if (err != EVRInitError_VRInitError_None)
+    {
+        printf("[VR-OVR] VR_InitInternal failed (%d)\n", (int)err);
+        return;
+    }
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "FnTable:%s", IVRSystem_Version);
+    s_sys = (struct VR_IVRSystem_FnTable*)p_GetIface(buf, &err);
+    snprintf(buf, sizeof(buf), "FnTable:%s", IVROverlay_Version);
+    s_ovl = (struct VR_IVROverlay_FnTable*)p_GetIface(buf, &err);
+
+    if (!s_sys || !s_ovl)
+    {
+        printf("[VR-OVR] interface tables unavailable\n");
+        p_Shutdown();
+        return;
+    }
+
+    s_vrReady = 1;
+    printf("[VR-OVR] OpenVR ready (poses via %s)\n",
+           s_usePoses ? "OpenVR in-process" : "file bridge");
+}
+
+/* ---- floating screen ------------------------------------------------------ */
+
+static void VrOvr_ScreenPlace(void)
+{
+    if (!s_vrReady || s_screen == 0) return;
+
+    /* 16:9-ish plane, ~1.4m up, 2m in front of the standing origin */
+    HmdMatrix34_t m;
+    memset(&m, 0, sizeof(m));
+    m.m[0][0] = 1.0f;
+    m.m[1][1] = 1.0f;
+    m.m[2][2] = 1.0f;
+    m.m[0][3] = 0.0f;
+    m.m[1][3] = 1.4f;
+    m.m[2][3] = -2.0f;
+
+    s_ovl->SetOverlayTransformAbsolute(
+        s_screen, ETrackingUniverseOrigin_TrackingUniverseStanding, &m);
+    s_ovl->SetOverlayWidthInMeters(s_screen, s_screenWidth);
+}
+
+static void VrOvr_ScreenEnsure(void)
+{
+    if (!s_vrReady || s_screen != 0) return;
+
+    EVROverlayError e = s_ovl->CreateOverlay("sh1.screen", "Silent Hill", &s_screen);
+    if (e != EVROverlayError_VROverlayError_None)
+    {
+        printf("[VR-OVR] CreateOverlay failed (%d)\n", (int)e);
+        s_screen = 0;
+        return;
+    }
+    VrOvr_ScreenPlace();
+}
+
+static void VrOvr_ScreenToggle(void)
+{
+    VrOvr_TryInit();
+    if (!s_vrReady) return;
+    VrOvr_ScreenEnsure();
+    if (s_screen == 0) return;
+
+    s_screenVisible = !s_screenVisible;
+    if (s_screenVisible)
+    {
+        VrOvr_ScreenPlace();
+        s_ovl->ShowOverlay(s_screen);
+        printf("[VR-OVR] floating screen ON\n");
+    }
+    else
+    {
+        s_ovl->HideOverlay(s_screen);
+        printf("[VR-OVR] floating screen OFF\n");
+    }
+}
+
+static void VrOvr_ScreenSize(float delta)
+{
+    if (!s_vrReady || s_screen == 0) return;
+    s_screenWidth += delta;
+    if (s_screenWidth < 0.5f) s_screenWidth = 0.5f;
+    if (s_screenWidth > 8.0f) s_screenWidth = 8.0f;
+    s_ovl->SetOverlayWidthInMeters(s_screen, s_screenWidth);
+    printf("[VR-OVR] screen width %.2fm\n", (double)s_screenWidth);
+}
+
+/* Copy the finished backbuffer into a GL texture and hand it to the overlay */
+static void VrOvr_PushFrame(void)
+{
+    if (!s_vrReady || !s_screenVisible || s_screen == 0) return;
+
+    SDL_Window* win = SDL_GL_GetCurrentWindow();
+    if (!win) return;
+
+    int w = 0, h = 0;
+    SDL_GL_GetDrawableSize(win, &w, &h);
+    if (w <= 0 || h <= 0) return;
+
+    if (s_frameTex == 0 || w != s_texW || h != s_texH)
+    {
+        if (s_frameTex == 0) glGenTextures(1, &s_frameTex);
+        glBindTexture(GL_TEXTURE_2D, s_frameTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        s_texW = w;
+        s_texH = h;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, s_frameTex);
+    glReadBuffer(GL_BACK);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    /* GL textures are bottom-up vs overlay UVs: flip V */
+    VRTextureBounds_t bounds;
+    bounds.uMin = 0.0f; bounds.vMin = 1.0f;
+    bounds.uMax = 1.0f; bounds.vMax = 0.0f;
+    s_ovl->SetOverlayTextureBounds(s_screen, &bounds);
+
+    struct Texture_t tex;
+    tex.handle      = (void*)(uintptr_t)s_frameTex;
+    tex.eType       = ETextureType_TextureType_OpenGL;
+    tex.eColorSpace = EColorSpace_ColorSpace_Gamma;
+    s_ovl->SetOverlayTexture(s_screen, &tex);
+}
+
+/* ---- poses ----------------------------------------------------------------- */
+
+static void VrOvr_PollPose(void)
+{
+    if (!s_vrReady || !s_usePoses) return;
+
+    TrackedDevicePose_t poses[1];
+    s_sys->GetDeviceToAbsoluteTrackingPose(
+        ETrackingUniverseOrigin_TrackingUniverseStanding, 0.0f, poses, 1);
+
+    if (!poses[0].bPoseIsValid) { s_havePose = 0; return; }
+
+    const HmdMatrix34_t* m = &poses[0].mDeviceToAbsoluteTracking;
+
+    s_pos[0] = m->m[0][3];
+    s_pos[1] = m->m[1][3];
+    s_pos[2] = m->m[2][3];
+
+    /* Euler extraction matching the common triad_openvr convention the
+     * Python bridge family uses. If axes misbehave vs the file bridge,
+     * this is the place to adjust. */
+    s_rot[1] = atan2f(m->m[0][2], m->m[2][2]);                    /* yaw */
+    s_rot[0] = asinf(-m->m[1][2]);                                /* pitch */
+    s_rot[2] = atan2f(m->m[1][0], m->m[1][1]);                    /* roll */
+
+    s_havePose = 1;
+}
+
+/* ---- public API ------------------------------------------------------------ */
+
+/* Called by vr_tracking.c: returns 1 and fills the pose when in-process
+ * poses are active and valid; 0 = caller should use the file bridge. */
+int VrOvr_GetHeadPose(float pos[3], float rot[3])
+{
+    if (!s_havePose || !s_usePoses) return 0;
+    pos[0] = s_pos[0]; pos[1] = s_pos[1]; pos[2] = s_pos[2];
+    rot[0] = s_rot[0]; rot[1] = s_rot[1]; rot[2] = s_rot[2];
+    return 1;
+}
+
+/* Hook: call once per frame from main_pc.c, right BEFORE PsyX_EndScene. */
+void VrOvr_EndFrame(void)
+{
+    static int prev9 = 0, prevMul = 0, prevDiv = 0;
+
+    VrOvr_TryInit();
+
+    const Uint8* ks = SDL_GetKeyboardState(NULL);
+    int n9   = ks[SDL_SCANCODE_KP_9] != 0;
+    int nMul = ks[SDL_SCANCODE_KP_MULTIPLY] != 0;
+    int nDiv = ks[SDL_SCANCODE_KP_DIVIDE] != 0;
+
+    if (n9 && !prev9)     { VrOvr_ScreenToggle(); }
+    if (nMul && !prevMul) { VrOvr_ScreenSize(+0.25f); }
+    if (nDiv && !prevDiv) { VrOvr_ScreenSize(-0.25f); }
+
+    prev9 = n9; prevMul = nMul; prevDiv = nDiv;
+
+    VrOvr_PollPose();
+    VrOvr_PushFrame();
+}

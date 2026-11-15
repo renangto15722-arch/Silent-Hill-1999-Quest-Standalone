@@ -2046,7 +2046,28 @@ void DbgOverlay_Render(void)
 
     /* In-game quick options overlay (F9) -- same self-contained-GL arrangement,
      * translucent so live setting changes show through it. */
-    { extern void Pc_QuickOptions_Draw(void); Pc_QuickOptions_Draw(); }
+    /* In Full VR the eye images never see this window overlay, so the panel
+     * is drawn into the VR 2D interface layer instead (PsyX_render.cpp) and
+     * shows in the headset over the live 3D world. Only there: drawing it at
+     * two sizes a frame would re-bake its text cache on every call. */
+    {
+        extern void Pc_QuickOptions_Draw(void);
+        extern int  PsyX_UiLayerBeginOverlay(void);
+        extern void PsyX_UiLayerEndOverlay(void);
+        extern int  g_PcQoVrLayer;
+        if (PsyX_UiLayerBeginOverlay())
+        {
+            g_PcQoVrLayer = 1;   /* centred, VR look */
+            Pc_QuickOptions_Draw();
+            g_PcQoVrLayer = 0;
+            PsyX_UiLayerEndOverlay();
+        }
+        else
+            Pc_QuickOptions_Draw();
+    }
+
+    /* VR radial wheel (vr_wheel.c): Full VR interface layer only. */
+    { extern void VrWheel_DrawOverlay(void); VrWheel_DrawOverlay(); }
 
     /* Modal Yes/No message box (options-screen "reset to defaults") — same
      * self-contained-GL arrangement; drawn last so it sits over every panel. */

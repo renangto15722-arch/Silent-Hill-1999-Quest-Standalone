@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Bullet-hole decals — see pc_decals.h for the system overview.
+﻿/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Bullet-hole decals â€” see pc_decals.h for the system overview.
  *
  * Render path mirrors the blood-splat drawer (func_80062708): world-space
  * corners as Q8 offsets from a Vw_WorldScreenMatrixAtPositionGet matrix,
@@ -36,7 +36,7 @@
 #define DECAL_POOL_SLOT HIRES_POOL_DECAL_SLOT
 #define DECAL_NATIVE    32
 #define DECAL_UV_MAX    (DECAL_NATIVE - 1)
-/* Prim clut word for the slot — canonical encoding in hires_override.h:
+/* Prim clut word for the slot â€” canonical encoding in hires_override.h:
  * clutY = 512 + (slot/64)*16 in bits 6..15 (bit 15 set), slot%64 in bits 0..5. */
 #define DECAL_CLUT                                                             \
     (u16)((((HIRES_POOL_CLUT_ROW_BASE + (DECAL_POOL_SLOT / 64) * HIRES_POOL_MAX_ROWS)) << 6) | \
@@ -56,7 +56,7 @@
 /* OT0 bucket scale. func_80057090's shift argument is 1 at every character and
  * held-item call site (world_draw.c:746, :1034), and Ipd_ChunkDraw passes a
  * bool, so nothing in this table is coarser than >>1. The decal has to use the
- * same scale as the characters it must lose to — blood's >>3 does not, which is
+ * same scale as the characters it must lose to â€” blood's >>3 does not, which is
  * why bullet holes drew over Harry's head while blood on the floor looks fine
  * (blood is only ever compared against things standing ON it). */
 #define DECAL_OT_SHIFT 1
@@ -83,7 +83,7 @@ static unsigned char* s_rgba          = NULL; /* decoded PNG, cached for re-regi
 static int            s_rgbaW         = 0;
 static int            s_rgbaH         = 0;
 static int            s_texRegistered = 0;
-static int            s_texMissing    = 0; /* decal.png absent/broken — logged once, feature off */
+static int            s_texMissing    = 0; /* decal.png absent/broken â€” logged once, feature off */
 
 void Pc_DecalAddBulletImpact(const VECTOR3* pos, const VECTOR3* dir, const VECTOR3* origin)
 {
@@ -112,7 +112,7 @@ void Pc_DecalAddBulletImpact(const VECTOR3* pos, const VECTOR3* dir, const VECTO
     else
     {
         /* WALL: SH1 collision carries no surface normals, so sample the wall
-         * plane with two parallel rays offset sideways from the shot — their
+         * plane with two parallel rays offset sideways from the shot â€” their
          * clipped hit points span the wall's XZ heading, so the decal lies
          * flat ON the wall instead of tilting to face the shooter (which read
          * wrong on angled shots). Falls back to shooter-facing when a sample
@@ -230,7 +230,7 @@ static int Pc_DecalEnsureTexture(void)
         f = fopen("gamedata/decal.png", "rb");
         if (f == NULL)
         {
-            SH_DBG("[DECAL] gamedata/decal.png not found — bullet decals disabled");
+            SH_DBG("[DECAL] gamedata/decal.png not found â€” bullet decals disabled");
             s_texMissing = 1;
             return 0;
         }
@@ -242,7 +242,7 @@ static int Pc_DecalEnsureTexture(void)
         {
             fclose(f);
             free(buf);
-            SH_DBG("[DECAL] gamedata/decal.png unreadable — bullet decals disabled");
+            SH_DBG("[DECAL] gamedata/decal.png unreadable â€” bullet decals disabled");
             s_texMissing = 1;
             return 0;
         }
@@ -252,7 +252,7 @@ static int Pc_DecalEnsureTexture(void)
         free(buf);
         if (s_rgba == NULL || s_rgbaW <= 0 || s_rgbaH <= 0)
         {
-            SH_DBG("[DECAL] gamedata/decal.png decode failed: %s — bullet decals disabled",
+            SH_DBG("[DECAL] gamedata/decal.png decode failed: %s â€” bullet decals disabled",
                    stbi_failure_reason());
             s_texMissing = 1;
             return 0;
@@ -307,7 +307,7 @@ void Pc_DecalsDraw(GsOT* ot)
         for (k = 0; k < 4; k++)
         {
             /* PSX quad Z-order: 0=TL 1=TR 2=BL 3=BR -> center -/+tan -/+bitan.
-             * Corner offsets in Q8 world units — the space the WS matrix
+             * Corner offsets in Q8 world units â€” the space the WS matrix
              * translation lives in (see func_8005E89C / blood splats). */
             s32  st  = (k & 1) ? 1 : -1;
             s32  sb  = (k & 2) ? 1 : -1;
@@ -403,7 +403,7 @@ void Pc_DecalsDraw(GsOT* ot)
          * the decal then never depth-tests, so a character/object in front covers
          * it in painter order instead of the decal punching through. The override
          * shader still alpha-discards the PNG's transparent texels, so the hole
-         * shape is preserved — only the surviving pixels blend. */
+         * shape is preserved â€” only the surviving pixels blend. */
         setSemiTrans(poly, true);
         {
             /* Take the room's ambient like billboards do (worldTintColor

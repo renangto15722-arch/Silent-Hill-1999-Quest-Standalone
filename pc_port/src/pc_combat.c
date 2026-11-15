@@ -13,6 +13,7 @@
 #include "pc_config.h"
 #include "bodyprog/item_screens.h"
 #include "sh_log.h"      /* SH_DBG */
+#include "vr_interact.h" /* VR_WHEEL_ID_MAP */
 #include "dbg_overlay.h" /* DbgOverlay_ToastLine — quick-heal result line */
 #include <stdio.h>
 #include "bodyprog/sound/sound_system.h"
@@ -202,6 +203,18 @@ static bool Pc_ManualReloadConditions(void)
 int g_PcReloadRequest = 0;
 static q19_12 s_reloadLatchT = 0;
 
+/* VR: X on the left controller (vr_interact.c). Taken like a bind press:
+ * conditions at press time, the same latch. Returns whether a reload is
+ * allowed right now (the caller raises the gun for it). */
+static int s_vrReloadPress = 0;
+static bool Pc_ManualReloadConditions(void);
+
+int Pc_VrReloadPress(void)
+{
+    s_vrReloadPress = 1;
+    return Pc_ManualReloadConditions();
+}
+
 /* Kept as the FSM-facing query — now just reads the latch. */
 bool PC_PlayerManualReloadRequested(void)
 {
@@ -210,7 +223,7 @@ bool PC_PlayerManualReloadRequested(void)
 
 static void Pc_ManualReloadSample(int sch)
 {
-    int e1, e2, e3;
+    int e1, e2, e3, e4;
 
     Pc_ReloadBindsResolve();
 
@@ -219,8 +232,10 @@ static void Pc_ManualReloadSample(int sch)
     e1 = (s_kbReload[sch]  != SDL_SCANCODE_UNKNOWN) && PC_KeyboardKeyClicked(s_kbReload[sch]);
     e2 = (s_kbReload2[sch] != SDL_SCANCODE_UNKNOWN) && PC_KeyboardKeyClicked(s_kbReload2[sch]);
     e3 = (s_padReload[sch] >= 0) && PC_RawControllerButtonClicked(s_padReload[sch]);
+    e4 = s_vrReloadPress;
+    s_vrReloadPress = 0;
 
-    if ((e1 || e2 || e3) && Pc_ManualReloadConditions()) {
+    if ((e1 || e2 || e3 || e4) && Pc_ManualReloadConditions()) {
         g_PcReloadRequest = 1;
         s_reloadLatchT    = Q12(0.30f);
     } else if (g_PcReloadRequest) {
@@ -368,6 +383,8 @@ static s32 Pc_HealItemCount(u8 id)
     return 0;
 }
 
+static void Pc_HealWithItem(u8 chosen);
+
 /* Auto-use the most sensible OWNED healing item for the current health. */
 void Pc_QuickHeal(void)
 {
@@ -408,6 +425,15 @@ void Pc_QuickHeal(void)
      * "Ampoule". Only the three healing items may ever be spent here. */
     if (chosen != InvItemId_HealthDrink && chosen != InvItemId_FirstAidKit && chosen != InvItemId_Ampoule)
         return;
+
+    Pc_HealWithItem(chosen);
+}
+
+/* Spend one `chosen` healing item and heal by it (quick heal, VR wheel). */
+static void Pc_HealWithItem(u8 chosen)
+{
+    q19_12 health = g_SysWork.playerWork.player.health;
+    s32    hp     = health >> Q12_SHIFT;
 
     /* [QUICKHEAL] One line per use: which slot paid for it and the whole live
      * inventory. A heal "with no healing items" (2026-09-17, a New Game warped
@@ -456,6 +482,60 @@ void Pc_QuickHeal(void)
                  (int)Pc_HealItemCount(InvItemId_Ampoule));
         DbgOverlay_ToastLine(line);
     }
+}
+
+/* ---- VR radial wheel (vr_interact.c) ------------------------------------- */
+
+/* The wheel's entries: the healing items still in stock, then the Map once
+ * Harry has any paper map (weapons live in the holsters). counts[] = the
+ * stock for a healing item, -1 for the Map. */
+int Pc_VrWheelItems(u8* ids, s32* counts, int max)
+{
+    static const u8 heals[] = { InvItemId_HealthDrink, InvItemId_FirstAidKit, InvItemId_Ampoule };
+    int n = 0, i;
+
+    for (i = 0; i < (int)(sizeof(heals) / sizeof(heals[0])) && n < max; i++)
+    {
+        s32 c = Pc_HealItemCount(heals[i]);
+        if (c <= 0) continue;
+        ids[n] = heals[i]; counts[n] = c; n++;
+    }
+    if (g_SavegamePtr->paperMapFlags != 0 && n < max)
+    {
+        ids[n] = VR_WHEEL_ID_MAP; counts[n] = -1; n++;
+    }
+    return n;
+}
+
+/* Harry has this weapon (VR holsters, vr_ik.c). */
+int Pc_VrOwnsWeapon(u8 id)
+{
+    return Pc_FindItemSlot(id) != NO_VALUE;
+}
+
+/* Use one entry: spend the wheel's healing item / equip a holster's weapon.
+ * Only when it is safe, like Cycle Weapons and Quick Heal; 0 = not now
+ * (caller may retry). */
+int Pc_VrWheelUse(u8 id)
+{
+    if (!Pc_ActionSafe())
+        return 0;
+
+    if (id == InvItemId_HealthDrink || id == InvItemId_FirstAidKit || id == InvItemId_Ampoule)
+    {
+        s32 hp = g_SysWork.playerWork.player.health >> Q12_SHIFT;
+        if (hp > 0 && hp < 100 && Pc_HealItemCount(id) > 0)
+            Pc_HealWithItem(id);
+        return 1;
+    }
+
+    if (id != g_SavegamePtr->equippedWeapon)
+    {
+        s32 slot = Pc_FindItemSlot(id);
+        if (slot != NO_VALUE)
+            Pc_EquipWeapon(id, slot);
+    }
+    return 1;
 }
 
 /* Per-frame draw for the Quick Heal green pulse: an additive full-screen green TILE
@@ -653,6 +733,11 @@ void Pc_ExtraActionsUpdate(void)
         g_PcReloadRequest = 0;
         s_reloadLatchT    = 0;
     }
+
+    /* VR radial wheel pick (vr_interact.c), used once it is safe */
+    { extern void VrInteract_GameUpdate(void); VrInteract_GameUpdate(); }
+    /* VR melee weapons hit by their own motion (vr_melee.c) */
+    { extern void VrMelee_Update(void); VrMelee_Update(); }
 
     if (!Pc_ActionSafe())
     {

@@ -496,6 +496,289 @@ void Vw_CoordHierarchyMatrixCompute(GsCOORDINATE2* rootCoord, MATRIX* transformM
 #endif
 }
 
+#ifdef SH_PC_PORT
+/* ---- Exact view matrices for PGXP ------------------------------------------
+ * Every model is put in view as VbWvsMatrix * (world - camera) in GTE integers:
+ * the coordinate chain composed level by level with a >>12 rounding each, and
+ * the translation rounded to whole world units (1/256 m). That error depends on
+ * the rotation, so as the view turns or moves each object - every map piece,
+ * every bone of a character - shifted by its own fraction of a unit against
+ * its neighbours, and things placed from the controllers (held weapon,
+ * holsters) moved in whole-unit steps. PGXP projects from an exact twin of the
+ * matrix when one is registered; nothing registered translations, so it only
+ * ever had the rounded ones.
+ *
+ * Here the same view matrix is rebuilt in double - the chain from the root,
+ * each local as it is (or as the float it was rounded from, see
+ * Vw_PcExactLocalSet), then about the same camera - and registered with PGXP.
+ * The integer result is untouched; without PGXP this does nothing. */
+extern int  g_PsxUsePgxp;
+extern void PGXP_MatrixRegister(const MATRIX* matrix, const double exactValues[9]);
+extern void PGXP_MatrixRegisterTranslation(MATRIX* matrix, const double exactValues[3]);
+
+/* Locals computed from floats and rounded into a MATRIX (vr_ik.c: held weapon,
+ * holster slots): their float values, found by the rounded content, so a copy
+ * of the matrix into another coordinate still finds them. */
+#define VW_PC_EXACT_SLOTS 16
+static struct { MATRIX key; double m[9], t[3]; u32 used; } s_vwPcExact[VW_PC_EXACT_SLOTS];
+static u32 s_vwPcExactTick;
+
+/* field by field: the MATRIX padding is not part of the value */
+static bool Vw_PcMatrixSame(const MATRIX* a, const MATRIX* b)
+{
+    s32 i, j;
+    for (i = 0; i < 3; i++)
+    {
+        if (a->t[i] != b->t[i]) return false;
+        for (j = 0; j < 3; j++)
+            if (a->m[i][j] != b->m[i][j]) return false;
+    }
+    return true;
+}
+
+void Vw_PcExactLocalSet(const MATRIX* rounded, const double m[9], const double t[3])
+{
+    s32 i, best = 0;
+    if (!g_PsxUsePgxp) return;
+    for (i = 0; i < VW_PC_EXACT_SLOTS; i++)
+    {
+        if (s_vwPcExact[i].used && Vw_PcMatrixSame(&s_vwPcExact[i].key, rounded)) { best = i; break; }
+        if (s_vwPcExact[i].used < s_vwPcExact[best].used) best = i;
+    }
+    s_vwPcExact[best].key  = *rounded;
+    memcpy(s_vwPcExact[best].m, m, sizeof(s_vwPcExact[best].m));
+    memcpy(s_vwPcExact[best].t, t, sizeof(s_vwPcExact[best].t));
+    s_vwPcExact[best].used = ++s_vwPcExactTick;
+}
+
+/* CHARACTERS. Each bone's local comes from the animation's lerp truncated to
+ * integers (bodyprog_anim_800445A4.c Anim_BoneUpdate), and each root from the
+ * Q12 position cut to whole units (~4 mm). Too many for the slots above, and
+ * all of them live in fixed coordinate arrays, so these are keyed by the
+ * coordinate itself; the rounded content still has to match, so anything that
+ * edits the local afterwards (IK, big head, look-at) gets its integers. */
+#define VW_PC_COORD_SLOTS 1024
+static struct { const GsCOORDINATE2* c; MATRIX key; double m[9], t[3]; } s_vwPcCoord[VW_PC_COORD_SLOTS];
+
+static u32 Vw_PcCoordHash(const GsCOORDINATE2* c)
+{
+    return (u32)(((uintptr_t)c >> 4) * 2654435761u) % VW_PC_COORD_SLOTS;
+}
+
+void Vw_PcExactCoordSet(const GsCOORDINATE2* c, const double m[9], const double t[3])
+{
+    u32 h, i, slot;
+    if (!g_PsxUsePgxp || c == NULL) return;
+    h    = Vw_PcCoordHash(c);
+    slot = h;
+    for (i = 0; i < 8; i++)
+    {
+        u32 k = (h + i) % VW_PC_COORD_SLOTS;
+        if (s_vwPcCoord[k].c == c || s_vwPcCoord[k].c == NULL) { slot = k; break; }
+    }
+    s_vwPcCoord[slot].c   = c;
+    s_vwPcCoord[slot].key = c->coord;
+    memcpy(s_vwPcCoord[slot].m, m, sizeof(s_vwPcCoord[slot].m));
+    memcpy(s_vwPcCoord[slot].t, t, sizeof(s_vwPcCoord[slot].t));
+}
+
+static bool Vw_PcCoordFind(const GsCOORDINATE2* c, const MATRIX* l, double m[9], double t[3])
+{
+    u32 h = Vw_PcCoordHash(c), i;
+    for (i = 0; i < 8; i++)
+    {
+        u32 k = (h + i) % VW_PC_COORD_SLOTS;
+        if (s_vwPcCoord[k].c == NULL) return false;
+        if (s_vwPcCoord[k].c == c)
+        {
+            if (!Vw_PcMatrixSame(&s_vwPcCoord[k].key, l)) return false;
+            memcpy(m, s_vwPcCoord[k].m, sizeof(double) * 9);
+            memcpy(t, s_vwPcCoord[k].t, sizeof(double) * 3);
+            return true;
+        }
+    }
+    return false;
+}
+
+/* A character's root placed at Q12_TO_Q8(pos) (every chara update does it):
+ * the same spot before the cut. Components placed any other way stay as they
+ * are. */
+void Vw_PcExactRootFromPos(const GsCOORDINATE2* root, const VECTOR3* posQ12)
+{
+    double m[9], t[3];
+    s32    i, j, any = 0;
+    if (!g_PsxUsePgxp || root == NULL || root->super != NULL) return;
+    for (i = 0; i < 3; i++)
+    {
+        const s32 p = (&posQ12->vx)[i];
+        for (j = 0; j < 3; j++) m[i * 3 + j] = (double)root->coord.m[i][j] / 4096.0;
+        if (root->coord.t[i] == Q12_TO_Q8(p)) { t[i] = (double)p / 16.0; any = 1; }
+        else                                   t[i] = (double)root->coord.t[i];
+    }
+    if (any) Vw_PcExactCoordSet(root, m, t);
+}
+
+/* A local in double: its float source when one is known, else its integers.
+ * c = the coordinate it belongs to (NULL: content lookup only). */
+static void Vw_PcLocalExact(const GsCOORDINATE2* c, const MATRIX* l, double m[9], double t[3])
+{
+    s32 i, j;
+    if (c != NULL && Vw_PcCoordFind(c, l, m, t))
+        return;
+    for (i = 0; i < VW_PC_EXACT_SLOTS; i++)
+    {
+        if (s_vwPcExact[i].used && Vw_PcMatrixSame(&s_vwPcExact[i].key, l))
+        {
+            memcpy(m, s_vwPcExact[i].m, sizeof(double) * 9);
+            memcpy(t, s_vwPcExact[i].t, sizeof(double) * 3);
+            return;
+        }
+    }
+    for (i = 0; i < 3; i++)
+    {
+        for (j = 0; j < 3; j++) m[i * 3 + j] = (double)l->m[i][j] / 4096.0;
+        t[i] = (double)l->t[i];
+    }
+}
+
+/* The coordinate's world matrix in double, mirroring
+ * Vw_CoordHierarchyMatrixCompute: a root keeps its workm when it was preset
+ * (flg already set, e.g. the map's model instances), else its local. */
+static void Vw_PcWorldExact(GsCOORDINATE2* c, double m[9], double t[3])
+{
+    GsCOORDINATE2* chain[24];
+    s32            n = 0, k, i, j;
+    double         lm[9], lt[3], nm[9], nt[3];
+
+    /* same chain rule as Vw_CoordHierarchyMatrixCompute: a non-canonical
+     * link ends the chain */
+    while (c != NULL && n < 24 && (uintptr_t)c >= 0x10000ULL && (uintptr_t)c < 0x0000800000000000ULL)
+    {
+        chain[n++] = c;
+        c = c->super;
+    }
+    if (n == 0)
+    {
+        Vw_PcLocalExact(NULL, &GsIDMATRIX, m, t);
+        return;
+    }
+    /* the root: what Vw_CoordHierarchyMatrixCompute left in its workm */
+    Vw_PcLocalExact(chain[n - 1], &chain[n - 1]->workm, m, t);
+    for (k = n - 2; k >= 0; k--)
+    {
+        Vw_PcLocalExact(chain[k], &chain[k]->coord, lm, lt);
+        for (i = 0; i < 3; i++)
+        {
+            for (j = 0; j < 3; j++)
+                nm[i * 3 + j] = m[i * 3 + 0] * lm[0 * 3 + j] + m[i * 3 + 1] * lm[1 * 3 + j] + m[i * 3 + 2] * lm[2 * 3 + j];
+            nt[i] = m[i * 3 + 0] * lt[0] + m[i * 3 + 1] * lt[1] + m[i * 3 + 2] * lt[2] + t[i];
+        }
+        memcpy(m, nm, sizeof(nm));
+        memcpy(t, nt, sizeof(nt));
+    }
+}
+
+/* The same for callers that place things from a bone (vr_ik.c: the held
+ * weapon from the hand). 0 without PGXP: nothing to be exact for. */
+s32 Vw_PcCoordWorldExact(GsCOORDINATE2* c, double m[9], double t[3])
+{
+    MATRIX dummy;
+    if (!g_PsxUsePgxp || c == NULL) return 0;
+    Vw_CoordHierarchyMatrixCompute(c, &dummy);   /* the root's workm, as the draw sees it */
+    Vw_PcWorldExact(c, m, t);
+    return 1;
+}
+
+/* EXACT CAMERA. D_800C3868 holds the view's position in whole world units;
+ * the first-person camera came from a Q12 position (vc_main.c), truncated.
+ * The dropped fraction is kept from there (Vw_PcCamSourceSet) and published
+ * when that matrix becomes the view (Vw_PcCamViewSet, vwSetViewInfoDirectMatrix
+ * - before the VR head offset, which only adds whole units). Any other view
+ * (cutscene cameras, a parented view) has no fraction: 0. */
+static s32    s_pcCamSrcT[3];
+static double s_pcCamSrcExact[3];
+static s32    s_pcCamSrcValid;
+static double s_pcCamFrac[3];
+
+void Vw_PcCamSourceSet(const MATRIX* camMat, const VECTOR3* posQ12)
+{
+    s32 i;
+    for (i = 0; i < 3; i++)
+    {
+        s_pcCamSrcT[i]     = camMat->t[i];
+        s_pcCamSrcExact[i] = (double)(&posQ12->vx)[i] / 16.0;
+    }
+    s_pcCamSrcValid = 1;
+}
+
+void Vw_PcCamViewSet(const MATRIX* camMat, s32 parented)
+{
+    s32 i, same = s_pcCamSrcValid && !parented;
+    for (i = 0; i < 3 && same; i++)
+        same = (camMat->t[i] == s_pcCamSrcT[i]);
+    for (i = 0; i < 3; i++)
+        s_pcCamFrac[i] = same ? s_pcCamSrcExact[i] - (double)s_pcCamSrcT[i] : 0.0;
+}
+
+/* EXACT CAMERA ROTATION. The VR head rotation is applied in float and written
+ * into the camera matrix truncated to Q12 (vr_tracking.c VrApplyRotation):
+ * up to 1/4096 off per entry and no longer orthonormal. Its float source is
+ * kept, keyed by the rounded entries, and used for VbWvsMatrix (the camera's
+ * transpose) while D_800C3868 still holds those entries. */
+static s16    s_pcCamRotKey[9];
+static double s_pcCamRotExact[9];
+static s32    s_pcCamRotValid;
+
+void Vw_PcCamRotSet(const MATRIX* rounded, const double m[9])
+{
+    s32 i, j;
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 3; j++)
+            s_pcCamRotKey[i * 3 + j] = rounded->m[i][j];
+    memcpy(s_pcCamRotExact, m, sizeof(s_pcCamRotExact));
+    s_pcCamRotValid = 1;
+}
+
+/* VbWvsMatrix's rotation rows in double: exact when the camera's are known. */
+static void Vw_PcViewRotExact(double r[9])
+{
+    s32 i, j, same = s_pcCamRotValid;
+    for (i = 0; i < 3 && same; i++)
+        for (j = 0; j < 3 && same; j++)
+            same = (D_800C3868.m[i][j] == s_pcCamRotKey[i * 3 + j]);
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 3; j++)
+            r[i * 3 + j] = same ? s_pcCamRotExact[j * 3 + i]                 /* the transpose */
+                                : (double)VbWvsMatrix.m[i][j] / 4096.0;
+}
+
+/* Register viewMat's exact twin: VbWvsMatrix * (world - camera at D_800C3868). */
+static void Vw_PcRegisterExactView(GsCOORDINATE2* rootCoord, MATRIX* viewMat)
+{
+    double wm[9], wt[3], vm[9], vt[3], vr[9];
+    s32    i, j;
+
+    if (!g_PsxUsePgxp || rootCoord == NULL)
+        return;
+    Vw_PcWorldExact(rootCoord, wm, wt);
+    Vw_PcViewRotExact(vr);
+    for (i = 0; i < 3; i++)
+    {
+        const double r0 = vr[i * 3 + 0];
+        const double r1 = vr[i * 3 + 1];
+        const double r2 = vr[i * 3 + 2];
+        for (j = 0; j < 3; j++)
+            vm[i * 3 + j] = r0 * wm[0 * 3 + j] + r1 * wm[1 * 3 + j] + r2 * wm[2 * 3 + j];
+        vt[i] = (double)VbWvsMatrix.t[i] +
+                r0 * (wt[0] - ((double)D_800C3868.t[0] + s_pcCamFrac[0])) +
+                r1 * (wt[1] - ((double)D_800C3868.t[1] + s_pcCamFrac[1])) +
+                r2 * (wt[2] - ((double)D_800C3868.t[2] + s_pcCamFrac[2]));
+    }
+    PGXP_MatrixRegister(viewMat, vm);
+    PGXP_MatrixRegisterTranslation(viewMat, vt);
+}
+#endif
+
 void Vw_CoordToViewSpaceMatrix(GsCOORDINATE2* rootCoord, MATRIX* viewMat) // 0x80049AF8
 {
     MATRIX worldMat;
@@ -506,6 +789,9 @@ void Vw_CoordToViewSpaceMatrix(GsCOORDINATE2* rootCoord, MATRIX* viewMat) // 0x8
     worldMat.t[2] -= D_800C3868.t[2];
 
     Vw_MultiplyAndTransformMatrix(&VbWvsMatrix, &worldMat, viewMat);
+#ifdef SH_PC_PORT
+    Vw_PcRegisterExactView(rootCoord, viewMat);
+#endif
 }
 
 void Vw_CoordToWorldAndViewMatrices(GsCOORDINATE2* rootCoord, MATRIX* worldMat, MATRIX* viewMat) // 0x80049B6C
@@ -519,6 +805,9 @@ void Vw_CoordToWorldAndViewMatrices(GsCOORDINATE2* rootCoord, MATRIX* worldMat, 
     worldMat->t[0] += D_800C3868.t[0];
     worldMat->t[1] += D_800C3868.t[1];
     worldMat->t[2] += D_800C3868.t[2];
+#ifdef SH_PC_PORT
+    Vw_PcRegisterExactView(rootCoord, viewMat);
+#endif
 }
 
 void Vw_WorldScreenMatrixAtPositionGet(MATRIX* worldToScreenMat, q19_12 posX, q19_12 posY, q19_12 posZ) // 0x80049C2C
