@@ -52,6 +52,7 @@
 
 #include "openvr_capi.h"
 #include "vr_input.h"
+#include "pc_config.h"
 
 #define XR_NO_PROTOTYPES
 #if defined(__ANDROID__)
@@ -1435,6 +1436,25 @@ int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
             return 0;
         s_recW = v[0].recommendedImageRectWidth;
         s_recH = v[0].recommendedImageRectHeight;
+        {
+            /* Headset_Res (vr_headset_res): render above the runtime's
+             * recommendation (Quest 3 recommends ~81% of its panel). Kept
+             * inside the runtime's max, even sizes. */
+            const float    k  = g_PcConfig.vrHeadsetRes / 100.0f;
+            const uint32_t rw = s_recW, rh = s_recH;
+            if (k > 1.0f)
+            {
+                uint32_t w = (uint32_t)(s_recW * k + 0.5f) & ~1u;
+                uint32_t h = (uint32_t)(s_recH * k + 0.5f) & ~1u;
+                if (v[0].maxImageRectWidth  > 0 && w > v[0].maxImageRectWidth)  w = v[0].maxImageRectWidth;
+                if (v[0].maxImageRectHeight > 0 && h > v[0].maxImageRectHeight) h = v[0].maxImageRectHeight;
+                s_recW = w;
+                s_recH = h;
+            }
+            VrOvr_Log("[VR-XR] runtime recommends %ux%u, max %ux%u; Headset_Res %.0f%% -> %ux%u\n",
+                      rw, rh, v[0].maxImageRectWidth, v[0].maxImageRectHeight,
+                      (double)g_PcConfig.vrHeadsetRes, s_recW, s_recH);
+        }
     }
 
 #if defined(__ANDROID__)
@@ -1525,7 +1545,7 @@ int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
     *compTbl = &s_compTbl;
     *ovlTbl  = &s_ovlTbl;
 
-    VrOvr_Log("[VR-XR] ready: render target %ux%u per eye (runtime recommended)\n", s_recW, s_recH);
+    VrOvr_Log("[VR-XR] ready: render target %ux%u per eye\n", s_recW, s_recH);
     return 1;
 }
 

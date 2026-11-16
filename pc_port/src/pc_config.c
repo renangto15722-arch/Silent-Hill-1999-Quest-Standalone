@@ -210,6 +210,7 @@ s_PcConfig g_PcConfig = {
     .vrBodyTurnDeadzone  = 15.0f,
     .vrSnapTurn          = 0,      /* smooth turning */
     .vrUiScreenSize      = 100.0f, /* 60 deg wide 2D interface panel */
+    .vrHeadsetRes        = 100.0f, /* runtime's recommended eye size */
     .vrEyeRes            = 100.0f, /* eye images at the window's resolution */
     .vrWeaponSize        = 100.0f, /* weapons at the size of the models they replace */
     /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
@@ -1401,6 +1402,11 @@ void PcConfig_Load(const char* path)
         {
             float v = (float)atof(value);
             g_PcConfig.vrUiScreenSize = (v < 50.0f) ? 50.0f : (v > 150.0f) ? 150.0f : v;
+        }
+        else if (strcmp(key, "vr_headset_res") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrHeadsetRes = (v < 100.0f) ? 100.0f : (v > 150.0f) ? 150.0f : v;
         }
         else if (strcmp(key, "vr_eye_res") == 0)
         {

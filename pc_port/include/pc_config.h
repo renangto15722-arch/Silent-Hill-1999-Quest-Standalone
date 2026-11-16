@@ -380,6 +380,7 @@ typedef struct {
     float vrBodyTurnDeadzone; /* VR: head yaw (deg) each side before the body turns to follow, 0..90 (vr_body_turn_deadzone) */
     int   vrSnapTurn;       /* VR: right-stick snap turn in degrees, 0 = smooth turning, else 15..90 in 15s (vr_snap_turn) */
     float vrUiScreenSize;   /* Full VR: 2D interface panel size in %, 100 = 60 deg wide, 50..150 (vr_ui_screen_size) */
+    float vrHeadsetRes;     /* OpenXR eye swapchain size, % of the runtime's recommended size, 100..150 (vr_headset_res); read at VR start */
     float vrEyeRes;         /* Full VR: eye images up to this % of the window's resolution, 100..200 (vr_eye_res); never more than the headset needs */
     float vrWeaponSize;     /* VR: size of the weapons' close-up models in the hand and holsters, %, 50..200 (vr_weapon_size; vr_weapon_hd.c) */
     int   pcOptionsLastPage; /* the PC Options page last shown, where VR's held Y opens it (pc_options_last_page; options.c) */

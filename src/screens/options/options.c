@@ -399,6 +399,10 @@ static const s_PcOpt PCOPT_V2[] = {
     /* Eye Resolution: the eye images' resolution cap, % of the window
      * (vr_full.c / PsyX_Stereo_SetScale); sharper and steadier edges for
      * GPU time, never more than the headset's own pixels need */
+    /* Headset Resolution: the headset image size, % of what the runtime
+     * recommends (Quest 3: 100 = 1680x1760, 123 = the 2064x2208 panel).
+     * Read when VR starts: takes effect after restarting the game. */
+    { "Headset_Res_Restart", NULL, "vr_headset_res",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrHeadsetRes,     NULL, 100.0f, 150.0f, 5.0f },
     { "Eye_Resolution",    NULL, "vr_eye_res",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrEyeRes,         NULL, 100.0f, 200.0f, 10.0f },
     { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
     { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
