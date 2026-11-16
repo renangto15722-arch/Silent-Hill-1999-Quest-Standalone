@@ -74,7 +74,16 @@ static const s8 D_80025EB0[] = {
 
 void Game_TimerUpdate(void) // 0x8004C8DC
 {
+#ifdef SH_PC_PORT
+    /* Q12(290 h) = 4276224000 does not fit in an int: Q12() converts the float
+     * through a signed int, which is undefined. Clang (Quest build) folded the
+     * whole function to 0 bytes, so every call fell through into
+     * GameState_ItemScreens_Update and the inventory ran during gameplay
+     * (its scroll arrows floated in front of the player). Same value, unsigned. */
+    #define TIME_290_HOURS        (((u32)(290 * 60 * 60)) << Q12_SHIFT)
+#else
     #define TIME_290_HOURS        Q12((290.0f * 60.0f) * 60.0f)
+#endif
     #define TIME_130_HOURS        Q12((130.0f * 60.0f) * 60.0f)
     #define TIME_290_OVERFLOW_MAX 3 // `add290Hours` has max value of 3.
 
