@@ -221,13 +221,39 @@ static void WheelTrack(VrPadState* st)
     }
 }
 
-/* World pickups in VR (events_util.c, map events): Full VR first person -
- * the item stays in the live world and only its Yes/No question shows. */
+/* World pickups in VR (events_util.c, map events): Full VR first person. */
 int Pc_VrPickupsInWorld(void)
 {
     /* not g_PcFpsCam: the VR first-person camera is only switched on in
      * gameplay, and these run as events */
     return VrTracking_HeadCamActive() && g_PcConfig.vrGameViewMode == 2;
+}
+
+/* A pickup's take screen is up (events call this every tick it runs): the
+ * world freezes from the next frame - before the take screen fades the
+ * picture out - and the take screen goes to the 2D panel in front of it
+ * (vr_tracking.c GetUiContext reads Pc_VrPickupHeld). Held for 150 ms, so
+ * the reading does not depend on where in the frame it happens. */
+#define VR_PICKUP_HOLD_MS 150u
+static Uint32 s_pickupHoldMs;
+static int    s_pickupHoldOn;
+
+void Pc_VrPickupHold(void)
+{
+    const Uint32 now = SDL_GetTicks();
+    if (!s_pickupHoldOn || now - s_pickupHoldMs > VR_PICKUP_HOLD_MS)
+    {
+        extern void VrOvr_MenuFreezeNow(void);
+        VrOvr_MenuFreezeNow();
+        VrOvr_Log("[VR-HANDS] pickup: take screen on the 2D panel\n");
+    }
+    s_pickupHoldOn = 1;
+    s_pickupHoldMs = now;
+}
+
+int Pc_VrPickupHeld(void)
+{
+    return s_pickupHoldOn && SDL_GetTicks() - s_pickupHoldMs <= VR_PICKUP_HOLD_MS;
 }
 
 /* HOLSTER (see the header) */

@@ -779,37 +779,14 @@ void MapEvent_MapItemTake(void) // 0x800DC3C8
     #define airScreamerChara g_SysWork.npcs[0]
 
 #ifdef SH_PC_PORT
-    /* VR: only the question over the live world (events_util.c
-     * Event_ItemTake); "Yes" then runs the Air Screamer scene as stock. */
+    /* VR: the stock take screen, shown on the 2D panel over the frozen
+     * stereo world (vr_interact.c Pc_VrPickupHold freezes the world before
+     * the screen fades, so the world around stays visible). */
     {
-        extern int Pc_VrPickupsInWorld(void);
-        if (Pc_VrPickupsInWorld() && g_SysWork.sysStateSteps[0] < 9)
-        {
-            switch (g_SysWork.sysStateSteps[0])
-            {
-                case 0:
-                    Player_ControlFreeze();
-                    SysWork_StateStepSet(0, 3);
-                    break;
-
-                case 4: // "No"
-                    Player_ControlUnfreeze(false);
-                    SysWork_StateSetNext(SysState_Gameplay);
-                    break;
-
-                case 6: // "Yes": the map, and the scene's camera/actor file
-                    g_SavegamePtr->paperMapFlags |= 1 << 1;
-                    Fs_QueueStartRead(FILE_ANIM_CAFE2_DMS, FS_BUFFER_11);
-                    Fs_QueueWaitForEmpty();   /* stock waits through two fades */
-                    SysWork_StateStepSet(0, 9);
-                    break;
-
-                default:
-                    MapMsg_DisplayAndHandleSelection(true, 59, 6, 4, 0, false);
-                    break;
-            }
-            return;
-        }
+        extern int  Pc_VrPickupsInWorld(void);
+        extern void Pc_VrPickupHold(void);
+        if (Pc_VrPickupsInWorld())
+            Pc_VrPickupHold();
     }
 #endif
 

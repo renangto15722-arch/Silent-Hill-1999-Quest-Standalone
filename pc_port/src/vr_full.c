@@ -284,6 +284,8 @@ static PF_Uniform1i               fUniform1i;
 static PF_ActiveTexture           fActiveTexture;
 static PF_BlendFuncSeparate       fBlendFuncSeparate;
 static PF_BlendEquationSeparate   fBlendEquationSeparate;
+typedef void   (*PF_BlendColor)(GLfloat, GLfloat, GLfloat, GLfloat);
+static PF_BlendColor              fBlendColor;
 
 static int LoadGl(void)
 {
@@ -313,6 +315,7 @@ static int LoadGl(void)
     L(fActiveTexture, "glActiveTexture");
     L(fBlendFuncSeparate, "glBlendFuncSeparate");
     L(fBlendEquationSeparate, "glBlendEquationSeparate");
+    L(fBlendColor, "glBlendColor");
     #undef L
     return 1;
 }
@@ -1051,9 +1054,27 @@ static void DrawUiPanel(int eye)
 }
 
 /* The flat frame as a 2D screen: Screen_Width at Screen_Distance, like the
- * floating screen, head-locked in front of the frozen world. Opaque. */
+ * floating screen, in front of the frozen world (drawn into the frozen
+ * image, so it stays where it opened). Menus with their own screen
+ * (inventory, options, save) are opaque. Screens the game lays over its
+ * frozen view (pause, the take screens of pickups: g_PsxPresentLastFrame)
+ * get a black backdrop instead of that flat view (PsyX_render.cpp
+ * GR_PresentLastFrame) - the stereo world around is the view - so here the
+ * world behind the panel is only dimmed and the panel is added with the
+ * screen blend: black stays see-through, the text and the item show. */
+#define VR_FLAT_OVERLAY_DIM 0.55f
+/* Over the frozen WORLD the eye images carry the current head pose, so the
+ * screen is placed in the room itself: the head pose when it opened
+ * (s_panelRef), the screen in front of it, seen from the current pose. Over
+ * the old frozen IMAGE (no recorded world) the image keeps its old pose and
+ * the screen rides in it as before. */
+static HmdMatrix34_t s_panelRef;
+static int           s_panelRefOn;
+
 static void DrawFlatPanel(int eye)
 {
+    extern int g_PsxPresentLastFrame;
+    const int  overlay = g_PsxPresentLastFrame != 0;
     extern float VrTracking_GetScreenWidth(void);
     extern float VrTracking_GetScreenDistance(void);
     extern float VrTracking_GetHalfIpdMeters(void);
@@ -1074,6 +1095,28 @@ static void DrawFlatPanel(int eye)
     for (k = 0; k < 4; k++)
     {
         float tx = cs[k][0] * hw + off, ty = cs[k][1] * hh;
+        if (s_panelRefOn && s_framePoseValid && !PsyX_StereoIsFrozen())
+        {
+            /* the corner in the opening head frame -> tracking -> current eye */
+            const float pc[3] = { cs[k][0] * hw * dist, cs[k][1] * hh * dist, -dist };
+            float       w[3], l[3];
+            int         i, j;
+            for (i = 0; i < 3; i++)
+            {
+                w[i] = s_panelRef.m[i][3];
+                for (j = 0; j < 3; j++) w[i] += s_panelRef.m[i][j] * pc[j];
+            }
+            for (i = 0; i < 3; i++)
+            {
+                l[i] = 0.0f;
+                for (j = 0; j < 3; j++) l[i] += s_framePose.m[j][i] * (w[j] - s_framePose.m[j][3]);
+            }
+            l[0] += (eye == 0) ? VrTracking_GetHalfIpdMeters() : -VrTracking_GetHalfIpdMeters();
+            if (l[2] > -0.05f)
+                return;   /* the screen is behind you */
+            tx = l[0] / -l[2];
+            ty = l[1] / -l[2];
+        }
         q[k * 4 + 0] = (2.0f * tx - (xMax + xMin)) / (xMax - xMin);
         q[k * 4 + 1] = (2.0f * ty - (yMax + yMin)) / (yMax - yMin);
         q[k * 4 + 2] = (cs[k][0] + 1.0f) * 0.5f;
@@ -1087,7 +1130,22 @@ static void DrawFlatPanel(int eye)
     fBindBuffer(GL_ARRAY_BUFFER, s_vbo[eye]);
     fBufferData(GL_ARRAY_BUFFER, sizeof(q), q, 0x88E8);
     fBindBuffer(GL_ARRAY_BUFFER, (GLuint)pArr);
+    if (!overlay)
+    {
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        return;
+    }
+    glEnable(GL_BLEND);
+    fBlendEquationSeparate(0x8006 /* GL_FUNC_ADD */, 0x8006);
+    /* world * (1 - dim) under the panel */
+    fBlendColor(0.0f, 0.0f, 0.0f, VR_FLAT_OVERLAY_DIM);
+    fBlendFuncSeparate(GL_ZERO, 0x8004 /* GL_ONE_MINUS_CONSTANT_ALPHA */, GL_ZERO, GL_ONE);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    /* + the panel, screen blend */
+    fBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ZERO, GL_ONE);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    fBlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+    glDisable(GL_BLEND);
 }
 
 /* VR POINTER: the right controller as the mouse on whichever menu panel
@@ -1131,14 +1189,17 @@ static void PointerUpdate(void)
         return;
     }
 
-    /* tracking space -> head frame: R^T (p - t); the ray is the aim's -Z */
-    for (i = 0; i < 3; i++)
+    /* tracking space -> the panel's head frame: R^T (p - t); the ray is the
+     * aim's -Z. A 2D screen over the frozen world stays where it opened
+     * (s_panelRef, DrawFlatPanel); the others follow the head. */
     {
-        o[i] = s_framePose.m[0][i] * (ap[0] - s_framePose.m[0][3]) +
-               s_framePose.m[1][i] * (ap[1] - s_framePose.m[1][3]) +
-               s_framePose.m[2][i] * (ap[2] - s_framePose.m[2][3]);
-        d[i] = -(s_framePose.m[0][i] * ar[0][2] + s_framePose.m[1][i] * ar[1][2] +
-                 s_framePose.m[2][i] * ar[2][2]);
+        const HmdMatrix34_t* fp = (flat && s_panelRefOn && !PsyX_StereoIsFrozen()) ? &s_panelRef : &s_framePose;
+        for (i = 0; i < 3; i++)
+        {
+            o[i] = fp->m[0][i] * (ap[0] - fp->m[0][3]) + fp->m[1][i] * (ap[1] - fp->m[1][3]) +
+                   fp->m[2][i] * (ap[2] - fp->m[2][3]);
+            d[i] = -(fp->m[0][i] * ar[0][2] + fp->m[1][i] * ar[1][2] + fp->m[2][i] * ar[2][2]);
+        }
     }
 
     if (qo)
@@ -1228,7 +1289,11 @@ int VrFull_Push(void* sysTbl, void* compTbl, int* parity,
      * the frozen picture up several times over every such screen. So it is
      * only read from frames whose world was really drawn; the frozen image
      * keeps it, like it keeps its pose (s_stampPose below). */
-    if (!PsyX_StereoIsFrozen() && !PsyX_StereoUiScreen())
+    /* ...and not from a menu's transition frame (UI context already up,
+     * world drawn with the game's own H ~187): it set the 98 x 66 deg of the
+     * game's view, and the frozen VR world was then squeezed into that. */
+    extern int VrTracking_GetUiContext(void);
+    if (!PsyX_StereoIsFrozen() && !PsyX_StereoUiScreen() && VrTracking_GetUiContext() == 0)
     {
         extern int PsyX_GetWorldTangents(float out[4]);
         float t[4];
@@ -1302,6 +1367,14 @@ int VrFull_Push(void* sysTbl, void* compTbl, int* parity,
         stTex = PsyX_Stereo_GetTexture(&stW, &stH);
     }
     const int flatOk = stTex != 0 && PsyX_StereoUiScreen() && FlatCapture();
+    /* the 2D screen over the frozen world opens where you look (DrawFlatPanel) */
+    if (flatOk && !s_panelRefOn && s_framePoseValid)
+    {
+        s_panelRef   = s_framePose;
+        s_panelRefOn = 1;
+    }
+    else if (!flatOk)
+        s_panelRefOn = 0;
 
     /* VR hands (vr_hands.c): live world frames only - a frozen image keeps an
      * older pose, and the 2D screens are menus */

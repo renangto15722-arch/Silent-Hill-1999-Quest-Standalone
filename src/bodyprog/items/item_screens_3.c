@@ -4431,15 +4431,14 @@ bool Gfx_PickupItemAnimate(u8 itemId) // 0x80054AD8
     GsCOORD2PARAM* transform;
 
 #ifdef SH_PC_PORT
-    /* VR world pickups (vr_interact.c Pc_VrPickupsInWorld): no take screen -
-     * no frozen frame, no item model spun up in front of it, which Full VR
-     * blew up to the whole field of view. The question shows at once, over
-     * the live world, as in events_util.c Event_ItemTake. Covers every
+    /* VR: the item model turns on the 2D panel over the frozen stereo world
+     * (vr_interact.c Pc_VrPickupHold), like every take screen. Covers every
      * special pickup (keys, medallions, the pipe, the shotgun...). */
     {
-        extern int Pc_VrPickupsInWorld(void);
+        extern int  Pc_VrPickupsInWorld(void);
+        extern void Pc_VrPickupHold(void);
         if (Pc_VrPickupsInWorld())
-            return true;
+            Pc_VrPickupHold();
     }
 
     /* Isolate the pickup model so its own front faces occlude its back faces

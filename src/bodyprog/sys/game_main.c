@@ -4155,6 +4155,11 @@ void MainLoop(void) // 0x80032EE0
                                   g_SysWork.sysState == SysState_SaveMenu1;
             const int uiIsMenu = uiMenuState && !uiWorldOnScreen;
 
+            { /* TEMP DIAG (PsyX_UiLayerDraw): game state of this UI pass */
+              extern int g_PcDiagGameState, g_PcDiagSysState, g_PcDiagMenuFlag;
+              g_PcDiagGameState = g_GameWork.gameState;
+              g_PcDiagSysState  = g_SysWork.sysState;
+              g_PcDiagMenuFlag  = (g_SysWork.sysFlags & SysFlag_MenuActive) != 0; }
             g_PcHorPlusEnabled = uiIsMenu ? 0 : g_PcHorPlusGate;
             g_PsxUIOrthoPass   = 1;
             GsDrawOt(&g_OrderingTable2[g_ActiveBufferIdx]);

@@ -479,8 +479,18 @@ int VrTracking_GetUiContext(void)
              * (Screen_BackgroundImgDraw & co. raise g_Pc2dBackgroundActive):
              * treated as world it was blown up over the whole field of view. */
             extern s32 g_Pc2dBackgroundActive;
+            extern int g_PsxPresentLastFrame;
             if (g_SysWork.sysState != SysState_Gameplay && g_Pc2dBackgroundActive > 0)
                 return 1;
+            /* An event that froze the world - the take screen of a pickup
+             * (the item model turning, the paper map) - shows the game's own
+             * screen on the 2D panel over the frozen stereo world. */
+            {
+                extern int Pc_VrPickupHeld(void);
+                if (Pc_VrPickupHeld() ||
+                    (g_SysWork.sysState == SysState_EventCallback && g_PsxPresentLastFrame))
+                    return 1;
+            }
             return 0;
         }
         default:
@@ -561,6 +571,76 @@ void VrTracking_SetGpuStereo(int on)
 float VrTracking_GetEyeSepUnits(void)
 {
     return (g_PcConfig.vrStereoDepth * VrUnitsPerMeter()) / 16.0f;
+}
+
+/* ---- FROZEN WORLD view (PsyX_render.cpp "FROZEN WORLD") -------------------
+ * The recorded world frame was seen from the head pose stored here at its
+ * end; while a menu is up it is drawn from the CURRENT pose. The camera
+ * yaws and pitches with the head (the roll is vr_full.c's, on the composed
+ * image, as in live play), and moves with it at true scale (World_Scale).
+ * Axes: tracking/head = OpenVR (x right, y up, z back); the game's view =
+ * PSX camera (x right, y down, z ahead), i.e. view = F * head, F = diag(1,-1,-1). */
+static float s_frzHeadPos[3], s_frzHeadRot[3];
+static int   s_frzHeadOk;
+
+void VrTracking_FrozenCapture(void)
+{
+    extern int VrOvr_GetHeadPose(float pos[3], float rot[3]);
+    s_frzHeadOk = VrOvr_GetHeadPose(s_frzHeadPos, s_frzHeadRot);
+}
+
+/* tracking vector -> head yaw/pitch frame (vr_ik.c ToHead) and back */
+static void FrzToHead(const float r[3], const float d[3], float h[3])
+{
+    const float cy = cosf(r[1]), sy = sinf(r[1]), cp = cosf(r[0]), sp = sinf(r[0]);
+    const float x = cy * d[0] - sy * d[2];
+    const float z = sy * d[0] + cy * d[2];
+    h[0] = x;
+    h[1] = cp * d[1] + sp * z;
+    h[2] = -sp * d[1] + cp * z;
+}
+
+static void FrzFromHead(const float r[3], const float h[3], float d[3])
+{
+    const float cy = cosf(r[1]), sy = sinf(r[1]), cp = cosf(r[0]), sp = sinf(r[0]);
+    const float z1 = sp * h[1] + cp * h[2];
+    d[1] = cp * h[1] - sp * h[2];
+    d[0] = cy * h[0] + sy * z1;
+    d[2] = -sy * h[0] + cy * z1;
+}
+
+/* Rcm (column-major) and T take a captured view-space point v to the current
+ * view: v' = R v + T. 0 = no pose (draw it as captured). */
+int VrTracking_FrozenView(float Rcm[9], float T[3])
+{
+    extern int   VrOvr_GetHeadPose(float pos[3], float rot[3]);
+    extern float VrIk_UnitsPerMeter(void);
+    float hp[3], hr[3], d[3], h[3], w[3];
+    int   i, k;
+
+    if (!s_frzHeadOk || !VrOvr_GetHeadPose(hp, hr))
+        return 0;
+    for (i = 0; i < 3; i++)
+    {
+        /* column i: the captured view axis e_i, seen from the current view */
+        const float e[3] = { (float)(i == 0), (float)(i == 1), (float)(i == 2) };
+        const float he[3] = { e[0], -e[1], -e[2] };   /* F */
+        FrzFromHead(s_frzHeadRot, he, w);
+        FrzToHead(hr, w, h);
+        Rcm[i * 3 + 0] = h[0];
+        Rcm[i * 3 + 1] = -h[1];
+        Rcm[i * 3 + 2] = -h[2];
+    }
+    /* the head moved by d (tracking, m): the world moves the other way */
+    for (k = 0; k < 3; k++) d[k] = hp[k] - s_frzHeadPos[k];
+    FrzToHead(hr, d, h);
+    {
+        const float s = VrIk_UnitsPerMeter();
+        T[0] = -h[0] * s;
+        T[1] =  h[1] * s;
+        T[2] =  h[2] * s;
+    }
+    return 1;
 }
 
 /* ---- FULL mode projection: the world fills the eye ----------------------

@@ -259,6 +259,12 @@ static float ReachScale(void)
     return VR_IK_UNITS_PER_M / (g_PcConfig.vrScale > 0.05f ? g_PcConfig.vrScale : 1.0f);
 }
 
+/* the same, for the frozen world's head translation (vr_tracking.c) */
+float VrIk_UnitsPerMeter(void)
+{
+    return ReachScale();
+}
+
 /* Uniform scale of a bone world matrix, and its pure rotation. */
 static float Ortho(const float r[3][3], float out[3][3])
 {

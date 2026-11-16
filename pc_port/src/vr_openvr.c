@@ -842,6 +842,8 @@ static void VrOvr_UiInWorldSet(int on)
     PsyX_StereoSetUiScreen(on);
 }
 
+void VrOvr_MenuFreezeNow(void);   /* below */
+
 static void VrOvr_AutoScreenUpdate(void)
 {
     extern int VrTracking_GetUiContext(void); /* vr_tracking.c */
@@ -873,6 +875,17 @@ static void VrOvr_AutoScreenUpdate(void)
         s_uiCtxLast   = ctx;
         s_uiCtxFrames = 0;
     }
+
+    /* An in-game menu opened by a plain button (pause, map) freezes the
+     * world at once, like the held-button menus (VrOvr_MenuFreezeNow): the
+     * debounce below would freeze one of its transition frames. */
+    if (ctx == 1 && s_uiCtxStable == 0 && !s_uiInWorld && s_stereoMode == VR_STEREO_FULL &&
+        VrTracking_UiInWorld())
+        VrOvr_MenuFreezeNow();
+    /* ...and a context that went back to gameplay before the debounce took
+     * it (a one-off flicker) lets the world go again */
+    if (s_uiInWorld && ctx == 0 && s_uiCtxStable == 0 && s_uiCtxFrames >= 3)
+        VrOvr_UiInWorldSet(0);
 
     /* 3-frame debounce rides out single-frame state flickers during
      * screen transitions (mode switches are cheap but not free). */
