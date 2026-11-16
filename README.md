@@ -2,18 +2,21 @@
 
 A standalone VR port of the original Silent Hill (1999), bringing the iconic survival horror experience to Meta Quest headsets. Explore the fog-covered town, solve puzzles, and face your nightmares in immersive VR.
 
+> **Work in progress.** Expect bugs and missing features.
+
 It runs natively on the headset (Quest 3, OpenXR, no PC streaming). It is a fork of the [Silent Hill Native PC Port](https://github.com/SlickAmogus/silent-hill-decomp) with a VR layer added; the same code also builds the PC VR version (OpenXR or OpenVR).
 
 **No game data is included.** You need your own Silent Hill USA disc (SLUS-00707) as `.bin` + `.cue`.
 
 ## VR features
 
-- Full 3D stereo with head tracking, roomscale and first-person body turn (snap or smooth)
-- VR hands; real holsters on hips, chest and shoulders (grip to draw or holster a weapon)
+- 6DoF motion controls: head and both hands tracked, roomscale, first-person body turn (snap or smooth)
+- Holsters on the hips, chest and shoulders (grip to draw or holster a weapon), with VR hands
+- Improved PGXP: steadier geometry and textures, no PS1 wobble
 - Gun aiming with the controller (laser or dot sight), physical melee swings
 - Physical paper map you hold in your hand
 - Healing/map wheel (hold A), item screen (hold X), options (hold Y)
-- HD weapon models, PGXP precision fixes, menus and item screens shown as panels in the world
+- HD weapon models, menus and item screens shown as panels in the world
 - In-game VR options: Options > VR, VR_Tuning, VR_Comfort, VR_Objects, VR_Holsters
 
 ## Install on Quest
