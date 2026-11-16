@@ -12,7 +12,7 @@ It runs natively on the headset (Quest 3, OpenXR, no PC streaming). It is a fork
 
 - 6DoF motion controls: head and both hands tracked, roomscale, first-person body turn (snap or smooth)
 - Holsters on the hips, chest and shoulders (grip to draw or holster a weapon), with VR hands
-- Improved PGXP: steadier geometry and textures, no PS1 wobble
+- Improved PGXP: steadier geometry and textures, less PS1 wobble
 - Gun aiming with the controller (laser or dot sight), physical melee swings
 - Physical paper map you hold in your hand
 - Healing/map wheel (hold A), item screen (hold X), options (hold Y)
