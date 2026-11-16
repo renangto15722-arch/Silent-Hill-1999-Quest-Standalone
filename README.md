@@ -41,13 +41,27 @@
   Silent Hill (USA).bin
   Silent Hill (USA).cue
   ```
-- *(Optional)* An HD texture pack in DuckStation format (`.zip`).
+- *(Optional)* **HD textures:** [Silent Hill DuckStation HD Textures 2.0](https://gbatemp.net/threads/silent-hill-duckstation-hd-textures-2-0.672174/) (`.zip`).
+- *(Optional)* **HD maps:** [HD Maps (Google Drive)](https://drive.google.com/drive/folders/1fYSrGnh8y0qOu1cEa4MbIja8Co-c-fje?usp=sharing).
+
+## 📂 Where each file goes on the Quest
+
+Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC with the cable: *This PC → Quest 3 → Internal shared storage → SilentHillVR → gamedata*.
+
+| What | Put it in | How |
+|---|---|---|
+| 💿 Disc `Silent Hill (USA).bin` + `.cue` | `/sdcard/SilentHillVR/gamedata/` | as they are |
+| 🖼️ HD textures (`.zip`) | `/sdcard/SilentHillVR/gamedata/texturemods/` | **keep it zipped** |
+| 🗺️ HD maps | `/sdcard/SilentHillVR/gamedata/load/` | the downloaded folders (`TIM`, ...) go inside `load` |
+
+> [!TIP]
+> The `SilentHillVR` folder appears after the game's first start. `Install-SilentHillVR.bat` creates it and copies everything for you.
 
 ## ⚡ Easy install — Windows PC + USB cable
 
-1. *(Optional)* Put `Silent Hill (USA).bin` and `.cue` next to `Install-SilentHillVR.bat` (or in a folder named `disc`), and an HD texture pack `.zip` in a folder named `texturemods`.
+1. *(Optional)* Put `Silent Hill (USA).bin` and `.cue` next to `Install-SilentHillVR.bat` (or in a folder named `disc`), the HD texture pack `.zip` in a folder named `texturemods`, and the HD maps' files in a folder named `load`.
 2. Connect the Quest (Developer Mode on) and run **`Install-SilentHillVR.bat`**.
-   It gets adb if needed (Google's official platform-tools), installs the game, grants its storage permission and copies your disc/textures.
+   It gets adb if needed (Google's official platform-tools), installs the game, grants its storage permission and copies your disc, textures and maps.
 3. Start the game on the Quest: **Library → Unknown Sources**.
 
 <details>
@@ -65,6 +79,10 @@
 4. *(Optional)* HD textures: put the pack's `.zip`, still zipped, in:
    ```
    /sdcard/SilentHillVR/gamedata/texturemods/
+   ```
+5. *(Optional)* HD maps: put the downloaded folders (`TIM`, ...) in:
+   ```
+   /sdcard/SilentHillVR/gamedata/load/
    ```
 
 </details>

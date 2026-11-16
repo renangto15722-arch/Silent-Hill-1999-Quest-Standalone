@@ -17,7 +17,8 @@ echo  Optional, before you start: put your own disc files
 echo  "Silent Hill (USA).bin" and "Silent Hill (USA).cue"
 echo  next to this .bat (or in a folder named "disc") and they
 echo  will be copied to the Quest too. An HD texture pack .zip
-echo  can go in a folder named "texturemods".
+echo  can go in a folder named "texturemods", and the HD maps
+echo  files in a folder named "load".
 echo.
 
 if not defined APK (
@@ -104,6 +105,10 @@ if defined DISCDIR (
     ) else (
         echo Disc already on the Quest.
     )
+)
+if exist "load\" (
+    echo Copying the HD maps ^(folder "load"^)...
+    "!ADB!" push "load" "%DATA%/gamedata/"
 )
 if exist "texturemods\*.zip" (
     for %%Z in ("texturemods\*.zip") do (
