@@ -1,0 +1,7 @@
+Put your own Silent Hill disc (USA, SLUS-00707) in this folder:
+
+  Silent Hill (USA).bin
+  Silent Hill (USA).cue
+
+Optional: an HD texture pack (DuckStation format, still zipped) goes in
+texturemods/.

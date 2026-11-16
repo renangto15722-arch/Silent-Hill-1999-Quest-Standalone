@@ -80,6 +80,9 @@ android {
         main {
             // SDLActivity and friends straight from the SDL2 source we link.
             java.srcDirs += "${rootProject.projectDir}/../deps/SDL2/android-project/app/src/main/java"
+            // Data the game needs besides the disc, unpacked by GameActivity
+            // into /sdcard/SilentHillVR on the first run (see shBundleData).
+            assets.srcDirs += "${buildDir}/generated/shassets"
         }
     }
 
@@ -102,3 +105,21 @@ android {
 dependencies {
     // Khronos OpenXR loader for Android: prebuilt in src/main/jniLibs (the game dlopens it).
 }
+
+// Bundled game data (assets/shdata): the port's own gamedata files and
+// controller DB + config.cfg, VR hands and the disc note. Dev layout: game in
+// ../silent-hill-decomp, data in ../quest-data; GitHub repo: game at ../..,
+// data in ../data.
+def shQuestRoot = file("${rootProject.projectDir}/..")
+def shGame = file("${shQuestRoot}/silent-hill-decomp/pc_port").exists() ?
+             file("${shQuestRoot}/silent-hill-decomp") : file("${shQuestRoot}/..")
+def shData = file("${shQuestRoot}/quest-data").exists() ?
+             file("${shQuestRoot}/quest-data") : file("${shQuestRoot}/data")
+
+def shBundleData = tasks.register('shBundleData', Sync) {
+    into "${buildDir}/generated/shassets/shdata"
+    from("${shGame}/pc_port/assets/gamedata") { into 'gamedata' }
+    from("${shGame}/pc_port/assets/gamecontrollerdb.txt")
+    from(shData)
+}
+preBuild.dependsOn shBundleData

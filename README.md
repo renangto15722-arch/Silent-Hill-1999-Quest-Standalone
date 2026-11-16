@@ -21,9 +21,12 @@ It runs natively on the headset (Quest 3, OpenXR, no PC streaming). It is a fork
 
 ## Install on Quest
 
-Download the release zip, then follow its `README.txt`: install the APK (SideQuest / adb), copy the `SilentHillVR` folder to the root of the Quest's storage, put your disc's `.bin`/`.cue` in `SilentHillVR/gamedata/`, start the game and allow "All files access".
+1. Install the APK from the release (SideQuest or `adb install`).
+2. Start it on the Quest (Library > Unknown Sources) and allow "All files access" when asked, then start it again.
+   The game sets up `/sdcard/SilentHillVR` by itself (config, VR hands, the port's files).
+3. Copy your disc's `Silent Hill (USA).bin` and `.cue` into `/sdcard/SilentHillVR/gamedata/` and play.
 
-HD textures (optional): a DuckStation-format texture pack `.zip` goes, still zipped, in `SilentHillVR/gamedata/texturemods/`.
+HD textures (optional): a DuckStation-format texture pack `.zip` goes, still zipped, in `/sdcard/SilentHillVR/gamedata/texturemods/`.
 
 ## Building
 

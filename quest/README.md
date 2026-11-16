@@ -49,15 +49,17 @@ survives).
 
 ## Game data on the headset
 
-Everything lives in `/sdcard/SilentHillVR` (the app asks for "All files
-access" on first start):
+The APK carries everything except the disc (`assets/shdata`, filled at build
+time by the `shBundleData` task from `pc_port/assets/gamedata`,
+`pc_port/assets/gamecontrollerdb.txt` and `quest/data/`). On the first run and
+after each update, `GameActivity` unpacks it into `/sdcard/SilentHillVR`
+(the app asks for "All files access" on first start). `config.cfg` is only
+written when missing, so the player's settings survive updates; saves, the
+disc and texture packs are never touched.
 
 ```
-/sdcard/SilentHillVR/config.cfg          (start from quest/data/config.cfg)
-/sdcard/SilentHillVR/vrhands/            (VR hand models, see the release zip)
-/sdcard/SilentHillVR/gamedata/           (pc_port/assets/gamedata + your disc)
-    Silent Hill (USA).bin / .cue         (your own USA disc, SLUS-00707)
-    texturemods/                         (optional DuckStation HD pack .zip)
+/sdcard/SilentHillVR/gamedata/Silent Hill (USA).bin / .cue   (your own USA disc, SLUS-00707)
+/sdcard/SilentHillVR/gamedata/texturemods/                    (optional DuckStation HD pack .zip)
 ```
 
 No game data is included in this repository or its releases.
