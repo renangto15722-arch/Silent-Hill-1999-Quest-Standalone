@@ -41,7 +41,7 @@
 #include <math.h>
 
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "vr_gl.h"
 
 #include "openvr_capi.h"
 
@@ -461,13 +461,13 @@ static void PollCalibrationKeys(void)
 static GLuint CompileProgram(void)
 {
     static const char* vsrc =
-        "#version 330 core\n"
+        VR_GLSL_VERSION
         "layout(location=0) in vec2 aPos;\n"
         "layout(location=1) in vec2 aUv;\n"
         "out vec2 vUv;\n"
         "void main(){ vUv=aUv; gl_Position=vec4(aPos,0.0,1.0); }\n";
     static const char* fsrc =
-        "#version 330 core\n"
+        VR_GLSL_VERSION
         "in vec2 vUv; out vec4 oCol; uniform sampler2D uTex; uniform int uAlpha;\n"
         "void main(){ vec4 t=texture(uTex,vUv); oCol=vec4(t.rgb,uAlpha!=0?t.a:1.0); }\n";
 
@@ -1422,6 +1422,35 @@ int VrFull_Push(void* sysTbl, void* compTbl, int* parity,
 
             /* composed image -> THE immutable submit texture (content
              * update on the latched handle: the only live path) */
+#if defined(__ANDROID__)
+            {
+                /* [VR-DIAG] composed eye content, once a second for a while */
+                static Uint32 tD = 0;
+                static int nD = 0;
+                const Uint32 now = SDL_GetTicks();
+                if (e == 0 && nD < 15 && now - tD >= 1000)
+                {
+                    unsigned char cp[4] = { 0 }, sp[4] = { 0 };
+                    GLenum err = glGetError();
+                    tD = now;
+                    nD++;
+                    glReadPixels((GLint)s_eyeW / 2, (GLint)s_eyeH / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, cp);
+                    if (stTex != 0)
+                    {
+                        static GLuint probeFbo = 0;
+                        if (!probeFbo) fGenFramebuffers(1, &probeFbo);
+                        fBindFramebuffer(GL_READ_FRAMEBUFFER, probeFbo);
+                        fFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, (GLuint)stTex, 0);
+                        glReadPixels(stW / 2, stH / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, sp);
+                        fBindFramebuffer(GL_FRAMEBUFFER, s_fbo[e]);
+                    }
+                    VrOvr_Log("[VR-DIAG] full: stTex=%u %dx%d centre %u,%u,%u | eye0 composed %u,%u,%u | prog=%u frozen=%d ui=%d flat=%d hands=%d | err before=0x%X after=0x%X\n",
+                              (unsigned)stTex, stW, stH, sp[0], sp[1], sp[2], cp[0], cp[1], cp[2],
+                              (unsigned)s_prog, PsyX_StereoIsFrozen(), PsyX_StereoUiScreen(), flatOk, handsOn,
+                              (unsigned)err, (unsigned)glGetError());
+                }
+            }
+#endif
             glBindTexture(GL_TEXTURE_2D, s_submitTex[e]);
             glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0,
                                 (GLsizei)s_eyeW, (GLsizei)s_eyeH);

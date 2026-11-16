@@ -737,9 +737,13 @@ s32 func_8008A3E0(s_SubCharacter* chara) // 0x8008A3E0
                     extern int g_DebugThirdPersonCam;
                     if (g_DebugThirdPersonCam && chara == &g_SysWork.playerWork.player)
                     {
+                        extern int VrCrosshair_GunActive(void);
+                        const int  vrGun = VrCrosshair_GunActive();
+                        /* VR: the shot goes where the laser points - no random
+                         * scatter, the shotgun's pellets in a tight cone around it */
                         s32 cap = (WEAPON_ATTACK_ID_GET(sp14) == EquippedWeaponId_Shotgun)
-                                      ? Q12_ANGLE(4.0f)
-                                      : Q12_ANGLE(0.5f);
+                                      ? (vrGun ? Q12_ANGLE(2.0f) : Q12_ANGLE(4.0f))
+                                      : (vrGun ? 0 : Q12_ANGLE(0.5f));
                         if (sp48 > cap)
                         {
                             sp48 = cap;

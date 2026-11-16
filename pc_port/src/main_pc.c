@@ -13,8 +13,17 @@
 #include <dirent.h>
 #include <time.h>
 
+/* Quest: SDLActivity calls SDL_main inside libmain.so, so SDL_main.h must
+ * rename main there. Desktop keeps the real C entry. */
+#if !defined(__ANDROID__)
 #define SDL_MAIN_HANDLED
+#endif
 #include <SDL.h>
+#if defined(__ANDROID__)
+#include <SDL_main.h>
+#include <SDL_system.h>   /* SDL_AndroidGetExternalStoragePath */
+#include <unistd.h>       /* chdir */
+#endif
 
 #include "common.h"
 #include "game.h"
@@ -717,6 +726,36 @@ static int Pc_UnfilteredPrim(int tpage, int clut)
 
 int main(int argc, char* argv[])
 {
+#if defined(__ANDROID__)
+    /* An APK starts in "/". Every path the port uses is relative (config.cfg,
+     * gamedata/, saves, logs), so anchor the working directory once.
+     * /sdcard/SilentHillVR (the app holds all-files access): it survives a
+     * reinstall, and files copied there over USB stay writable for the game.
+     * Without that access, the app's own external files dir. */
+    {
+        const char* dataDir = "/sdcard/SilentHillVR";
+        if (chdir(dataDir) != 0 || access(".", W_OK) != 0)
+            dataDir = SDL_AndroidGetExternalStoragePath();
+        if (dataDir == NULL || chdir(dataDir) != 0)
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Silent Hill VR: cannot enter the data directory (%s)",
+                         dataDir ? dataDir : "unavailable");
+            return 1;
+        }
+    }
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    /* SDL on Android exposes the headset IMU as a joystick by default; it
+     * must not take pad slot 0 from the motion-controller virtual pad. */
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+    /* stdout/stderr (fprintf(stderr) diagnostics all over the port) into a
+     * file next to the data, readable over USB */
+    freopen("SilentHillVR.stdout.log", "w", stdout);
+    freopen("SilentHillVR.stderr.log", "w", stderr);
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#endif
+
     /* Log file is NOT opened until after config load. SH_DBG calls before
      * that point are silently no-ops (the macro short-circuits on a NULL
      * handle). Avoids creating SilentHill.log when enable_debug_log=0. */
@@ -879,8 +918,12 @@ int main(int argc, char* argv[])
                 setvbuf(stdout, NULL, _IONBF, 0);
                 setvbuf(stderr, NULL, _IONBF, 0);
             } else {
+#if !defined(__ANDROID__)
+                /* Quest keeps SilentHillVR.stdout/stderr.log (set up at start):
+                 * the only diagnostics readable over USB. */
                 freopen(SH_NULL_DEVICE, "w", stdout);
                 freopen(SH_NULL_DEVICE, "w", stderr);
+#endif
             }
         }
         /* Always capture log lines into the overlay ring buffer so the in-game

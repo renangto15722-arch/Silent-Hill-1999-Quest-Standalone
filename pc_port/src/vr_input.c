@@ -25,6 +25,9 @@
 
 #include "vr_input.h"
 
+extern void VrOvr_Log(const char* fmt, ...);   /* SilentHillVR.log */
+#define printf VrOvr_Log
+
 static SDL_Joystick* s_joy = NULL;
 static int           s_failed = 0;
 
@@ -72,7 +75,15 @@ static int Attach(void)
         s_failed = 1;
         return 0;
     }
-    printf("[VR-INPUT] motion controllers -> virtual gamepad\n");
+    printf("[VR-INPUT] motion controllers -> virtual gamepad (device %d, instance %d)\n",
+           idx, (int)SDL_JoystickInstanceID(s_joy));
+    {
+        int i;
+        for (i = 0; i < SDL_NumJoysticks(); i++)
+            printf("[VR-INPUT]   joystick %d '%s' gamecontroller=%d\n", i,
+                   SDL_JoystickNameForIndex(i) ? SDL_JoystickNameForIndex(i) : "?",
+                   (int)SDL_IsGameController(i));
+    }
     return 1;
 }
 
@@ -85,6 +96,19 @@ void VrInput_Push(const VrPadState* s)
     if (!s_joy && (!s || !s->valid)) return;
     if (!Attach()) return;
     if (!s || !s->valid) s = &neutral;
+
+    {
+        /* first presses only: proves the buttons reach the virtual pad */
+        static int lastMask = 0, logged = 0;
+        int mask = (s->a ? 1 : 0) | (s->b ? 2 : 0) | (s->x ? 4 : 0) | (s->y ? 8 : 0) |
+                   (s->menu ? 16 : 0) | (s->rt > 0.5f ? 32 : 0) | (s->lt > 0.5f ? 64 : 0);
+        if (mask != lastMask && logged < 20)
+        {
+            printf("[VR-INPUT] pad buttons 0x%02X (a b x y menu rt lt)\n", mask);
+            logged++;
+        }
+        lastMask = mask;
+    }
 
     /* SDL: stick Y down is positive; VR sticks report up positive. */
     SDL_JoystickSetVirtualAxis(s_joy, SDL_CONTROLLER_AXIS_LEFTX,  Axis(s->lx));

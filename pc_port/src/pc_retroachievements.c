@@ -1436,5 +1436,8 @@ int         Pc_Ra_IsActive(void) { return 0; }
 const char* Pc_Ra_StatusLine(void) { return ""; }
 void        Pc_Ra_RequestBadge(const char* badgeName) { (void)badgeName; }
 int         Pc_Ra_SnapshotAchievements(PcRaAch* out, int max) { (void)out; (void)max; return 0; }
+/* console commands (pc_console_cmd.c) reach these even with RA compiled out */
+int         Pc_Ra_Why(const char* filter) { (void)filter; return 0; }
+int         Pc_Ra_PreviewFirst(void) { return 0; }
 
 #endif /* SH_RETROACHIEVEMENTS */

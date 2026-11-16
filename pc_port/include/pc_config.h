@@ -385,11 +385,12 @@ typedef struct {
     int   pcOptionsLastPage; /* the PC Options page last shown, where VR's held Y opens it (pc_options_last_page; options.c) */
     float vrPlayerHeight;   /* VR: your height in cm - Harry's body is scaled from his feet to it (as you see it, World_Scale included); 0 = his own size (vr_player_height) */
     float vrGripEdit[6];    /* VR: the EQUIPPED weapon's grip offset, as the VR Weapon Grip page edits it: forward, up, right (cm), pitch, yaw, roll (deg), controller frame (vr_item_*) */
+    int   vrGunSight;       /* VR: gun sight, 0 = none, 1 = red dot, 2 = laser beam + dot (vr_gun_sight; vr_crosshair.c) */
     float vrAimOfs[5];      /* VR: the gun ray (shot + crosshair) from the right controller's aim pose: muzzle forward, up, right (cm), pitch, yaw (deg) (vr_aim_*) */
     float vrMapOfs[6];      /* VR: the paper map in the hand: forward, up, right (cm), pitch, yaw, roll (deg), the sheet's own frame (vr_map_*) */
     float vrGrip[12][6];    /* VR: the saved grip offset of each weapon, PcConfig_GripSlot order (vr_grip_<inventory id>) */
     float vrGripScale[12];  /* VR: each weapon's close-up model scale, %, 50..200 (7th value of vr_grip_<id>; vr_weapon_hd.c) */
-    float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..200 (vr_map_scale; vr_ik.c) */
+    float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..300, default 150 (vr_map_scale; vr_ik.c) */
     int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
     int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
     int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */

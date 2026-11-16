@@ -243,6 +243,7 @@ static const QoRowDef s_pageVrGrip[] = {
  * own page: with the grip rows it ran past the bottom of the panel. */
 static const QoRowDef s_pageVrGunAim[] = {
     QO_HEADER("Gun Aim"),
+    { ROW_OPT,    "vr_gun_sight",          0, "Sight" },
     { ROW_OPT,    "vr_aim_fwd",            0, "Muzzle Forward" },
     { ROW_OPT,    "vr_aim_up",             0, "Muzzle Up" },
     { ROW_OPT,    "vr_aim_right",          0, "Muzzle Right" },

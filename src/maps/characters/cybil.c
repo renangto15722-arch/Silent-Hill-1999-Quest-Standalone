@@ -7,6 +7,10 @@
 #include "main/rng.h"
 #include "maps/shared.h"
 #include "maps/characters/cybil.h"
+/* SH_QUEST forward decl */ void Ai_Cybil_MovementUpdate(s_SubCharacter* chara, GsCOORDINATE2* coords);
+/* SH_QUEST forward decl */ void Ai_Cybil_Init(s_SubCharacter* chara);
+/* SH_QUEST forward decl */ void Ai_Cybil_AnimUpdate(s_SubCharacter* chara, s_AnmHeader* animHdr, GsCOORDINATE2* coords);
+/* SH_QUEST forward decl */ void Ai_Cybil_AnimStateUpdate(s_SubCharacter* chara, GsCOORDINATE2* coords);
 
 /** AI code for `Chara_Cybil`
  *

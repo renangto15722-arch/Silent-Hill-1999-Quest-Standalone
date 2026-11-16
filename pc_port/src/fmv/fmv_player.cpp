@@ -9,10 +9,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-
-/* VR frame push (pc_port/src/vr_openvr.c) - C linkage */
-extern "C" void VrOvr_EndFrameFmv(void);
 #endif
+
+/* VR frame push (pc_port/src/vr_openvr.c) - C linkage. Quest too. */
+extern "C" void VrOvr_EndFrameFmv(void);
 
 #include "fmv_player.h"
 #include "ReadAVI.h"

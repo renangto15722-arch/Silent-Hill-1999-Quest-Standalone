@@ -7,7 +7,8 @@
  the GTA SA VR hands (vr_hands.c, drawn over each eye by vr_full.c). Harry
  is NOT drawn in first-person VR gameplay (bodyprog_bone_80044F14.c); his
  skeleton still animates, so cutscenes and every other camera show him as
- always. The IK arms (build24-150) are gone (Renan 03/11/2026).
+ always. There is no VR body: the IK arms and torso (build24-150) were
+ removed for the GTA SA hands (03/11/2026).
 
  What stays here is the frame everything VR is placed in: the view, Harry's
  root and body yaw, his holsters, the equipped weapon in the hand, the paper
@@ -38,24 +39,15 @@
  times 1/World_Scale. The held weapon is placed on it, so the VR Weapon
  Grip values tuned on the old IK hand keep their meaning.
 
- TORSO: left to the animation. Holding the torso and head at the standing
- pose (build48-130, PlaceTorso) while the hips and legs walked stretched
- the waist, where the chest mesh shares vertices with the hips: the lower
- chest deformed over the legs. The IK only moves the arms; the shoulders
- follow the animated torso and the arms reach the controllers from there.
- The walk lean still takes the chest forward under the camera, so the whole
- skeleton moves back with it, rigidly, on the root (KeepNeckUnderView).
- Head Height is where your eyes sit on Harry: too low, and the top of his
- chest (the V of the collar) is in the view.
+ KEEP NECK UNDER VIEW: Harry is hidden in first person, but his root still
+ carries the holsters. The walk animation leans his torso forward; the whole
+ skeleton is moved back on the root by that lean (KeepNeckUnderView) so the
+ holsters stay under the player instead of swinging ahead with each step.
 
- PLAYER HEIGHT (vr_player_height): people differ, so Harry's whole body is
- scaled from his feet by the root's local (SyncRootToView) to the player's
- height as they see it - height / World_Scale over Harry's own height
- (s_harryHeight, from his standing neck at the first idle). The whole body
- at once, so no seam stretches; the arm IK and Rebuild Body measure in the
- world and follow. Bone world matrices then carry that scale, so they are
- tested with IsScaledRotation (Ortho first). Head Height still places the
- camera, independently.
+ PLAYER HEIGHT (vr_player_height): Harry's skeleton is scaled from his feet
+ to the player's height (height / World_Scale over Harry's own height,
+ s_harryHeight), so the holsters sit where the player's body is. Head Height
+ places the camera independently.
 
  HOLSTERS (vr_holster*; vr_interact.c owns the drawn/holstered state): six
  slots on Harry's body - left/right hip, left/right chest, behind the
@@ -291,6 +283,42 @@ static void PointToWorld(const HeadFrame* f, const float p[3], float out[3])
 
     DirToWorld(f, d, w);
     for (i = 0; i < 3; i++) out[i] = w[i] * scale + f->cam.t[i];
+}
+
+/* PointToWorld backwards, for n points (xyz each): game world Q8 -> tracking
+ * space meters. The VR hands (vr_hands.c) are drawn in the tracking space;
+ * the held weapon's and the held map's shapes come back through this so the
+ * hands can be depth-tested against them. 0 = no head pose / camera. */
+int VrIk_WorldToTracking(const float* w, float* p, int n)
+{
+    HeadFrame f;
+    float     scale = ReachScale();
+    int       k;
+
+    if (n <= 0 || !HeadFrameGet(&f))
+        return 0;
+    for (k = 0; k < n; k++)
+    {
+        const float* in  = w + k * 3;
+        float*       out = p + k * 3;
+        float        d[3], c[3], x, y, z, z1;
+        int          i;
+        for (i = 0; i < 3; i++) d[i] = (in[i] - f.cam.t[i]) / scale;
+        /* world -> PSX camera axes: cam.r^T (a rotation) */
+        for (i = 0; i < 3; i++)
+            c[i] = f.cam.r[0][i] * d[0] + f.cam.r[1][i] * d[1] + f.cam.r[2][i] * d[2];
+        /* PSX camera (y down, z ahead) -> the head's yaw/pitch frame (OpenVR axes) */
+        x = c[0];
+        y = -c[1];
+        z = -c[2];
+        /* ToHead backwards: undo the pitch, then the yaw */
+        z1     = f.sp * y + f.cp * z;
+        out[1] = f.cp * y - f.sp * z;
+        out[0] = f.cy * x + f.sy * z1;
+        out[2] = -f.sy * x + f.cy * z1;
+        for (i = 0; i < 3; i++) out[i] += f.hp[i];
+    }
+    return 1;
 }
 
 /* Grip pose (the palm) -> the wrist, in the CONTROLLER's frame, so the
@@ -986,8 +1014,14 @@ int VrIk_MapSheetFrame(int hand, float centre[3], float right[3], float up[3], f
     const float s    = ReachScale();
     /* the VR Holsters page's Map in Hand rows (vr_map_*): pitch adds to the
      * built-in tilt, yaw turns it about its up axis, roll about its face */
-    const float* mo  = g_PcConfig.vrMapOfs;
+    const float* mo0 = g_PcConfig.vrMapOfs;
     const float  d2r = 3.14159265f / 180.0f;
+    /* The values are set with the map in the LEFT hand; the right hand gets
+     * them mirrored (sideways position, yaw and roll flip sides), like the
+     * left-hand knife mirrors the VR Weapon Grip. Both controllers' grip
+     * frames share the same axes, so the rest needs no change. */
+    const float  mside = (hand == 1) ? -1.0f : 1.0f;
+    const float  mo[6] = { mo0[0], mo0[1], mo0[2] * mside, mo0[3], mo0[4] * mside, mo0[5] * mside };
     const float tilt = ((VrOvr_RuntimeIsOpenXR() ? VR_MAP_SHEET_TILT_XR : VR_MAP_SHEET_TILT_VR) + mo[3]) * d2r;
     const float ct = cosf(tilt), st = sinf(tilt);
     const float cy = cosf(mo[4] * d2r), sy = sinf(mo[4] * d2r);

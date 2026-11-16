@@ -35,7 +35,7 @@
 #include <math.h>
 
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "vr_gl.h"
 
 #include "openvr_capi.h"
 
@@ -196,6 +196,15 @@ static unsigned short* s_ind;
 static unsigned int    s_vtxN, s_indN;
 static int             s_built;    /* the buffers hold this frame's hands */
 static int             s_uploaded;
+static unsigned int    s_handIndN, s_occIndN;   /* hands first, then the occluders */
+
+/* what the hands hold, for their depth test (VrHands_OccluderSet) */
+#define VR_OCC_SLOTS    2
+#define VR_OCC_MAXV     1024      /* per slot, a triangle list */
+#define VR_OCC_STALE_MS 150u
+static float  s_occP[VR_OCC_SLOTS][VR_OCC_MAXV * 3];   /* tracking space, m */
+static int    s_occN[VR_OCC_SLOTS];
+static Uint32 s_occT[VR_OCC_SLOTS];
 
 /* per eye depth renderbuffer, attached to vr_full's eye FBO */
 static GLuint   s_depthRb[2], s_depthFbo[2];
@@ -249,7 +258,7 @@ static GLuint Compile(GLenum type, const char* src)
 }
 
 static const char* kVs =
-    "#version 330 core\n"
+    VR_GLSL_VERSION
     "layout(location=0) in vec3 aPos;\n"
     "layout(location=1) in vec3 aNrm;\n"
     "layout(location=2) in vec2 aUv;\n"
@@ -258,7 +267,7 @@ static const char* kVs =
     "void main(){ gl_Position = uMvp * vec4(aPos, 1.0); vNrm = aNrm; vUv = aUv; }\n";
 /* Silent Hill is dark: the hands are lit a little lower than in GTA SA */
 static const char* kFs =
-    "#version 330 core\n"
+    VR_GLSL_VERSION
     "uniform sampler2D uTex; uniform vec3 uLight;\n"
     "in vec3 vNrm; in vec2 vUv; out vec4 oCol;\n"
     "void main(){\n"
@@ -347,8 +356,8 @@ static int Init(void)
         return 0;
     }
 
-    s_vtx = (float*)malloc(sizeof(float) * 8 * (s_mesh[0].vc + s_mesh[1].vc));
-    s_ind = (unsigned short*)malloc(sizeof(unsigned short) * (s_mesh[0].ic + s_mesh[1].ic));
+    s_vtx = (float*)malloc(sizeof(float) * 8 * (s_mesh[0].vc + s_mesh[1].vc + VR_OCC_SLOTS * VR_OCC_MAXV));
+    s_ind = (unsigned short*)malloc(sizeof(unsigned short) * (s_mesh[0].ic + s_mesh[1].ic + VR_OCC_SLOTS * VR_OCC_MAXV));
     if (!s_vtx || !s_ind) return 0;
 
     s_state = 1;
@@ -464,7 +473,63 @@ static void Build(const HmdMatrix34_t* head)
         for (k = 0; k < m->ic; k++)
             s_ind[s_indN++] = (unsigned short)(base + m->idx[k]);
     }
+    s_handIndN = s_indN;
+    s_occIndN  = 0;
+
+    /* the held weapon's / map's shapes after the hands (depth only, see
+     * VrHands_DrawEye), in the same head frame */
+    if (s_handIndN > 0)
+    {
+        const Uint32 now = SDL_GetTicks();
+        int          slot;
+        for (slot = 0; slot < VR_OCC_SLOTS; slot++)
+        {
+            int v;
+            if (s_occN[slot] <= 0 || now - s_occT[slot] > VR_OCC_STALE_MS)
+                continue;
+            for (v = 0; v < s_occN[slot]; v++)
+            {
+                const float* gp  = &s_occP[slot][v * 3];
+                float*       out = s_vtx + s_vtxN;
+                int          i;
+                for (i = 0; i < 3; i++)
+                {
+                    out[i] = head->m[0][i] * (gp[0] - head->m[0][3]) + head->m[1][i] * (gp[1] - head->m[1][3]) +
+                             head->m[2][i] * (gp[2] - head->m[2][3]);
+                    out[3 + i] = 0.0f;
+                }
+                out[6] = out[7] = 0.0f;
+                s_ind[s_indN++] = (unsigned short)(s_vtxN / 8);
+                s_vtxN += 8;
+            }
+        }
+        s_occIndN = s_indN - s_handIndN;
+    }
     s_uploaded = 0;
+}
+
+/* OCCLUDERS. The hands are drawn over the composed eye image, which has no
+ * depth, so a hand holding a weapon covered all of it. The game hands over
+ * the shapes of what is in the hands - slot 0 the held weapon's close-up
+ * model (vr_weapon_hd.c), slot 1 the held map's sheet (pc_minimap.c) - as
+ * triangles in world Q8, each game frame it draws them. They go into the
+ * hands' depth buffer only (no colour), so a finger behind the grip is
+ * hidden and the weapon's image shows there, a finger in front of it is
+ * drawn. A slot not refreshed for VR_OCC_STALE_MS (put away) stops counting. */
+void VrHands_OccluderSet(int slot, const float* worldPts, int nVerts)
+{
+    extern int VrIk_WorldToTracking(const float* w, float* p, int n);
+    if (slot < 0 || slot >= VR_OCC_SLOTS)
+        return;
+    if (nVerts > VR_OCC_MAXV) nVerts = VR_OCC_MAXV;
+    nVerts -= nVerts % 3;
+    if (worldPts == NULL || nVerts <= 0 || !VrIk_WorldToTracking(worldPts, s_occP[slot], nVerts))
+    {
+        s_occN[slot] = 0;
+        return;
+    }
+    s_occN[slot] = nVerts;
+    s_occT[slot] = SDL_GetTicks();
 }
 
 /* Depth renderbuffer of eye e's FBO, (re)made at its size. */
@@ -558,7 +623,17 @@ void VrHands_DrawEye(int eye, GLuint fbo, unsigned w, unsigned h, const float ex
     hActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, s_tex);
     hBindSampler(0, 0);
-    glDrawElements(GL_TRIANGLES, (GLsizei)s_indN, GL_UNSIGNED_SHORT, (void*)0);
+    if (s_occIndN > 0)
+    {
+        /* what the hands hold: depth only, so the hand passes behind it */
+        GLboolean cm[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+        glGetBooleanv(GL_COLOR_WRITEMASK, cm);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDrawElements(GL_TRIANGLES, (GLsizei)s_occIndN, GL_UNSIGNED_SHORT,
+                       (void*)(size_t)(s_handIndN * sizeof(unsigned short)));
+        glColorMask(cm[0], cm[1], cm[2], cm[3]);
+    }
+    glDrawElements(GL_TRIANGLES, (GLsizei)s_handIndN, GL_UNSIGNED_SHORT, (void*)0);
 
     glDisable(GL_DEPTH_TEST);
     glDepthFunc((GLenum)pDepthFunc);

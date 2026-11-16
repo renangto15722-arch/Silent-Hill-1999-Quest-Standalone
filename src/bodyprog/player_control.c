@@ -11020,6 +11020,10 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                      * Harry's animated hand: the bullet then runs down the very
                      * ray the dot sits on */
                     *_hand = _rayPos;
+                    /* the bullet trace (func_8008A0E4 below) starts at
+                     * D_800C44E0, which is otherwise LAST frame's muzzle: a
+                     * moving hand fired a few cm off the laser */
+                    D_800C44E0 = _rayPos;
                 }
                 else if (Ray_CharaTraceQuery(&_tr, &_rayPos, &_off, player))
                 {
@@ -11208,10 +11212,28 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                 sp20.vy = Q8_TO_Q12(sp80.vy);
                 sp20.vz = Q8_TO_Q12(sp80.vz);
 
+#ifdef SH_PC_PORT
+                {
+                    /* VR: the beam leaves the gun's muzzle along the laser
+                     * (unkRot = the free-aim ray), never the auto-aim heading */
+                    extern int VrCrosshair_GunActive(void);
+                    if (VrCrosshair_GunActive())
+                    {
+                        sp20.vx = playerCombat.attackPosition.vx;
+                        sp20.vy = playerCombat.attackPosition.vy;
+                        sp20.vz = playerCombat.attackPosition.vz;
+                    }
+                    else if (g_GameWork.config.extraAutoAiming)
+                    {
+                        unkRot.vx = player->angleToTarget;
+                    }
+                }
+#else
                 if (g_GameWork.config.extraAutoAiming)
                 {
                     unkRot.vx = player->angleToTarget;
                 }
+#endif
 
                 g_MapOverlayHdr.particleHyperBlasterBeamDraw(&sp20, &unkRot.vx, &unkRot.vy);
             }

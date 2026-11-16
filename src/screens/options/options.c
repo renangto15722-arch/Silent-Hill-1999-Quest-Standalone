@@ -219,6 +219,8 @@ static const int         VAL_VIEWMODE[] = { 0, 1, 2 };
 static const char* const LBL_VIEWMODE[] = { "2D_Screen", "3D_Screen", "Full_VR" };
 static const int         VAL_CUTVIEW[]  = { 0, 2 };
 static const int         VAL_SNAPTURN[] = { 0, 15, 30, 45, 60, 75, 90 };
+static const int         VAL_SIGHT[]    = { 0, 1, 2 };
+static const char* const LBL_SIGHT[]    = { "Off", "Dot", "Laser" };
 static const int         VAL_HOLSTERW[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
 static const char* const LBL_HOLSTERW[] = { "None", "Kitchen_Knife", "Steel_Pipe", "Rock_Drill", "Hammer",
                                             "Chainsaw", "Katana", "Axe", "Handgun", "Hunting_Rifle",
@@ -483,7 +485,7 @@ static const struct { const char* name; const char* key; int idx; float lo, hi, 
     { "___Rotation_X_deg", "vr_map_pitch", 3, -90.0f,  90.0f, 5.0f },
     { "___Rotation_Y_deg", "vr_map_yaw",   4, -90.0f,  90.0f, 5.0f },
     { "___Rotation_Z_deg", "vr_map_roll",  5, -180.0f, 180.0f, 5.0f },
-    { "___Scale",          "vr_map_scale", -1, 50.0f,  200.0f, 5.0f },
+    { "___Scale",          "vr_map_scale", -1, 50.0f,  300.0f, 5.0f },
 };
 
 static int PcOpt_VrObjectsBuild(void)
@@ -576,6 +578,7 @@ static void PcOpt_SaveSlider(const s_PcOpt* e)
  * muzzle) and where it points, from the right controller's aim pose. The
  * shot, the bullet and the crosshair dot all use this ray; live. */
 static const s_PcOpt PCOPT_VA[] = {
+    { "Gun_Sight",         &g_PcConfig.vrGunSight,         "vr_gun_sight",          VAL_SIGHT,     3, LBL_SIGHT,     NULL, 1, PCK_INT },
     { "Muzzle_Forward_cm", NULL, "vr_aim_fwd",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[0],      NULL, -30.0f, 30.0f, 0.5f },
     { "Muzzle_Up_cm",      NULL, "vr_aim_up",             NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[1],      NULL, -30.0f, 30.0f, 0.5f },
     { "Muzzle_Right_cm",   NULL, "vr_aim_right",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrAimOfs[2],      NULL, -30.0f, 30.0f, 0.5f },

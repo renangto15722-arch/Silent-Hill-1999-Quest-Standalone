@@ -6,6 +6,9 @@
 #include "maps/shared.h"
 #include "maps/characters/larval_stalker.h"
 #include "sh_log.h"
+/* SH_QUEST forward decl */ void sharedFunc_800D1DBC_1_s00(s_SubCharacter* larvalStalker);
+/* SH_QUEST forward decl */ void Ai_LarvalStalker_Init(s_SubCharacter* larvalStalker);
+/* SH_QUEST forward decl */ void Ai_LarvalStalker_ControlUpdate(s_SubCharacter* larvalStalker);
 
 #define larvalStalkerProps larvalStalker->properties.larvalStalker
 

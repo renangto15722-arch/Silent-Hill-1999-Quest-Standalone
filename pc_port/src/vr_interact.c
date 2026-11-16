@@ -321,8 +321,18 @@ static float HandToMapHolster(int handIdx)
     return d;
 }
 
+/* One thing per hand: the map taken into the hand holding the drawn weapon
+ * sends the weapon to its holster (it stays equipped; a grip at the holster
+ * draws it again). */
 static void MapTake(int handIdx)
 {
+    if (g_SavegamePtr->equippedWeapon != InvItemId_Unequipped && VrInteract_WeaponHand() == handIdx &&
+        VrInteract_HolsterState() == 0)
+    {
+        s_holstered     = 1;
+        s_holsterWeapon = g_SavegamePtr->equippedWeapon;
+        VrOvr_Log("[VR-HANDS] map: weapon %d to its holster\n", (int)s_holsterWeapon);
+    }
     s_mapHand = handIdx;
     VrOvr_Log("[VR-HANDS] map: in the %s hand\n", handIdx ? "right" : "left");
 }
@@ -402,12 +412,14 @@ static int GripPress(int handIdx)
             {
                 /* drawn, in the other hand: this hand takes it */
                 s_leftWeapon = (handIdx == 0);
+                if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d to the %s hand\n", (int)at, side);
                 return GRIP_SPENT;
             }
             s_holstered     = !s_holstered;
             s_holsterWeapon = at;
             s_leftWeapon    = (handIdx == 0);
+            if (!s_holstered && s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
             VrOvr_Log("[VR-HANDS] holster: weapon %d %s (%s hand)\n", (int)at,
                       s_holstered ? "holstered" : "drawn", side);
             return GRIP_SPENT;
@@ -419,6 +431,7 @@ static int GripPress(int handIdx)
             {
                 s_holstered  = 0;
                 s_leftWeapon = (handIdx == 0);
+                if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d drawn (equipped, %s hand)\n", (int)at, side);
             }
             return GRIP_SPENT;

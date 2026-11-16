@@ -3,6 +3,7 @@
 #include "bodyprog/math/math.h"
 #include "bodyprog/sound/sound_system.h"
 #include "maps/map5/map5_s01.h"
+/* SH_QUEST forward decl */ void func_800CDA8C(void);
 
 s16 func_800CD20C(void) // 0x800CD20C
 {

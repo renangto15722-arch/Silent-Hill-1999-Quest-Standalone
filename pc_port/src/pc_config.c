@@ -214,7 +214,8 @@ s_PcConfig g_PcConfig = {
     .vrWeaponSize        = 100.0f, /* weapons at the size of the models they replace */
     /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
     .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f },
-    .vrMapScale          = 100.0f, /* the paper map at its own size */
+    .vrGunSight          = 2,      /* laser beam + dot on every gun */
+    .vrMapScale          = 150.0f, /* Quest: the paper map 1.5x (45 x 34 cm), readable at the headset's resolution */
     .vrMoveDir           = 0,      /* walk where the body faces */
     .vrHeadLock          = 0,
     .vrHolsterOn         = 1,
@@ -1323,6 +1324,11 @@ void PcConfig_Load(const char* path)
                 if (strcmp(key + 11, names[i]) == 0)
                     g_PcConfig.vrHolsterSlot[i] = (v < 0 || v > PCCFG_HOLSTER_MAP) ? 0 : v;
         }
+        else if (strcmp(key, "vr_gun_sight") == 0)
+        {
+            int v = atoi(value);
+            g_PcConfig.vrGunSight = (v < 0) ? 0 : (v > 2) ? 2 : v;
+        }
         else if (strncmp(key, "vr_aim_", 7) == 0)
         {
             static const char* const names[5] = { "fwd", "up", "right", "pitch", "yaw" };
@@ -1368,7 +1374,7 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_map_scale") == 0)
         {
             float v = (float)atof(value);
-            g_PcConfig.vrMapScale = (v < 50.0f) ? 50.0f : (v > 200.0f) ? 200.0f : v;
+            g_PcConfig.vrMapScale = (v < 50.0f) ? 50.0f : (v > 300.0f) ? 300.0f : v;
         }
         else if (strcmp(key, "vr_grab_radius") == 0)
         {

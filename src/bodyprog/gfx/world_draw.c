@@ -1327,7 +1327,16 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
             MATRIX     hm;
             const int  hs = (heldItem->itemId != InvItemId_CutscenePhone) ? VrInteract_HolsterState() : -1;
 
+            extern int VrInteract_MapHand(void);
+            extern int VrInteract_WeaponHand(void);
+            extern void VrWeaponHd_HandOccluder(int itemId, const MATRIX* plmWorld);
+
             if (hs == 1)
+                return;
+            /* the map is in the weapon's hand (a weapon with no holster slot
+             * cannot be put away): one thing per hand, the map wins */
+            if (heldItem->itemId != InvItemId_CutscenePhone && VrInteract_MapHand() >= 0 &&
+                VrInteract_MapHand() == VrInteract_WeaponHand())
                 return;
             if (heldItem->itemId != InvItemId_CutscenePhone && VrIk_HeldItemMatrix(&hm))
             {
@@ -1335,6 +1344,8 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
                 s_inHand.super = NULL;
                 s_inHand.flg   = 0;
                 coord = &s_inHand;
+                /* its shape for the VR hand's depth test (vr_hands.c) */
+                VrWeaponHd_HandOccluder(heldItem->itemId, &hm);
             }
         }
 #endif

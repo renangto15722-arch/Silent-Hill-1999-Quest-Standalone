@@ -371,6 +371,70 @@ int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black)
     return 1;
 }
 
+/* The close-up model's triangles in the game world as the hand holds it
+ * (plmWorld = VrIk_HeldItemMatrix, no parent), for the VR hand's depth test
+ * (vr_hands.c): the hand then shows where it is in front of the weapon and
+ * hides where the weapon is in front of it. Every model is TG3 only (mode
+ * 0x34: uv/clut/tpage words, then n0 v0 n1 v1 n2 v2). A weapon without a
+ * close-up model gives none: the hand is then drawn whole over it. */
+#define VR_WPN_OCC_MAXV 1024
+void VrWeaponHd_HandOccluder(int itemId, const MATRIX* plmWorld)
+{
+    extern void VrHands_OccluderSet(int slot, const float* worldPts, int nVerts);
+    static float pts[VR_WPN_OCC_MAXV * 3];
+    const int    w = VrWeaponHd_Index(itemId);
+    const VrWeaponHd* h;
+    const s16*   verts;
+    const u8*    p;
+    float        pm[3][3], pt[3], lm[9], lt[3];
+    double       k;
+    u32          i;
+    int          n = 0, slot, a, b, c;
+
+    if (w < 0 || !s_hd[w].ready)
+    {
+        VrHands_OccluderSet(0, NULL, 0);
+        return;
+    }
+    h     = &s_hd[w];
+    slot  = PcConfig_GripSlot(itemId);
+    k     = ((slot >= 0) ? g_PcConfig.vrGripScale[slot] : 100.0f) / 100.0;
+    for (a = 0; a < 9; a++) lm[a] = (float)(h->em[a] * k);
+    for (a = 0; a < 3; a++)
+    {
+        lt[a] = (float)(h->et[a] * k);
+        pt[a] = (float)plmWorld->t[a];
+        for (b = 0; b < 3; b++) pm[a][b] = (float)plmWorld->m[a][b] / 4096.0f;
+    }
+    verts = (const s16*)h->tmd.vertop;
+    p     = (const u8*)h->tmd.primtop;
+    for (i = 0; i < (u32)h->tmd.primn && n + 3 <= VR_WPN_OCC_MAXV; i++)
+    {
+        if (p[3] == 0x34 && p[1] == 6)
+        {
+            const u16* q = (const u16*)(p + 16);
+            const u16  vi[3] = { q[1], q[3], q[5] };
+            if (vi[0] < h->tmd.vern && vi[1] < h->tmd.vern && vi[2] < h->tmd.vern)
+            {
+                for (c = 0; c < 3; c++)
+                {
+                    const s16* v = verts + vi[c] * 4;
+                    float      l[3];
+                    /* TMD -> PLM (the fit, with the weapon's Scale) -> world */
+                    for (a = 0; a < 3; a++)
+                        l[a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
+                    for (a = 0; a < 3; a++)
+                        pts[n * 3 + a] = pm[a][0] * l[0] + pm[a][1] * l[1] + pm[a][2] * l[2] + pt[a];
+                    n++;
+                }
+            }
+        }
+        if (p[1] == 0) break;
+        p += (1 + p[1]) * 4;
+    }
+    VrHands_OccluderSet(0, pts, n);
+}
+
 /* Test view (SH1VR_WPNHD_SHOW=<item id>, sim checks): that weapon's close-up
  * model half a metre in front of the camera, side-on, barrel to the right,
  * grip down - the whole model, with no hand in the way. */

@@ -33,7 +33,14 @@
 =============================================================================
 */
 
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#include <jni.h>
+#include <EGL/egl.h>
+#include <android/log.h>
+#else
 #include <windows.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,16 +48,33 @@
 #include <math.h>
 
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "vr_gl.h"
 
 #include "openvr_capi.h"
 #include "vr_input.h"
 
 #define XR_NO_PROTOTYPES
+#if defined(__ANDROID__)
+#define XR_USE_PLATFORM_ANDROID
+#define XR_USE_GRAPHICS_API_OPENGL_ES
+#else
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_OPENGL
+#endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+
+/* Quest: the swapchain image struct and the graphics requirements call are
+ * the GLES flavours of the desktop ones; the rest of the file is shared. */
+#if defined(__ANDROID__)
+typedef XrSwapchainImageOpenGLESKHR VrXrSwapchainImage;
+#define VRXR_SWAPCHAIN_IMAGE_TYPE XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR
+#define VRXR_GFX_FUNCS(X) X(xrGetOpenGLESGraphicsRequirementsKHR)
+#else
+typedef XrSwapchainImageOpenGLKHR VrXrSwapchainImage;
+#define VRXR_SWAPCHAIN_IMAGE_TYPE XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR
+#define VRXR_GFX_FUNCS(X) X(xrGetOpenGLGraphicsRequirementsKHR)
+#endif
 
 #ifndef GL_READ_FRAMEBUFFER
 #define GL_READ_FRAMEBUFFER 0x8CA8
@@ -76,7 +100,7 @@
 #define VRXR_FUNCS(X) \
     X(xrDestroyInstance) X(xrDestroySession) \
     X(xrGetSystem) X(xrGetInstanceProperties) \
-    X(xrEnumerateViewConfigurationViews) X(xrGetOpenGLGraphicsRequirementsKHR) \
+    X(xrEnumerateViewConfigurationViews) VRXR_GFX_FUNCS(X) \
     X(xrCreateSession) X(xrBeginSession) X(xrEndSession) \
     X(xrEnumerateReferenceSpaces) X(xrCreateReferenceSpace) \
     X(xrPollEvent) X(xrWaitFrame) X(xrBeginFrame) X(xrEndFrame) \
@@ -114,7 +138,7 @@ typedef struct
     XrSwapchain sc;
     int         w, h;
     uint32_t    count;
-    XrSwapchainImageOpenGLKHR img[8];
+    VrXrSwapchainImage img[8];
 } VrXrChain;
 
 #define VRXR_MAX_OVERLAYS 4
@@ -129,7 +153,11 @@ typedef struct
     VrXrChain         chain;
 } VrXrOverlay;
 
+#if defined(__ANDROID__)
+static void*      s_loader;
+#else
 static HMODULE    s_loader;
+#endif
 static XrInstance s_inst    = XR_NULL_HANDLE;
 static XrSystemId s_sysId   = XR_NULL_SYSTEM_ID;
 static XrSession  s_session = XR_NULL_HANDLE;
@@ -170,9 +198,13 @@ enum
     VRXR_ACT_COUNT
 };
 extern void VrOvr_Log(const char* fmt, ...);   /* SilentHillVR.log (vr_openvr.c) */
+#if defined(__ANDROID__)
+#define printf VrOvr_Log
+#endif
 
 static XrActionSet s_actSet = XR_NULL_HANDLE;
 static XrAction    s_act[VRXR_ACT_COUNT];
+static int         s_haveTouchPlus = 0;   /* XR_META_touch_controller_plus enabled */
 static int         s_actReady = 0;
 
 /* Controller grip poses (IK body, vr_ik.c), in the standing space at the
@@ -366,7 +398,7 @@ static int ChainEnsure(VrXrChain* c, int w, int h)
     uint32_t i;
     for (i = 0; i < 8; i++)
     {
-        c->img[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
+        c->img[i].type = VRXR_SWAPCHAIN_IMAGE_TYPE;
         c->img[i].next = NULL;
     }
     c->count = 0;
@@ -400,8 +432,39 @@ static int ChainCopy(VrXrChain* c, GLuint src, int srcW, int srcH)
     gl_BindFramebuffer(GL_DRAW_FRAMEBUFFER, s_dstFbo);
     gl_FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                             c->img[idx].image, 0);
-    gl_BlitFramebuffer(0, 0, srcW, srcH, 0, 0, c->w, c->h, GL_COLOR_BUFFER_BIT,
-                       (srcW == c->w && srcH == c->h) ? GL_NEAREST : GL_LINEAR);
+    {
+#if defined(__ANDROID__)
+        static int diagFrame = 0, diagCount = 0;
+        int diag = (diagCount < 60 && (++diagFrame % 360) == 1);   /* Quest bring-up: reads pixels back */
+#else
+        static int diagCount = 0;
+        const int  diag = 0;
+#endif
+        unsigned char sp[4] = { 0, 0, 0, 0 }, dp[4] = { 0, 0, 0, 0 };
+        GLenum rs = 0, ds = 0, e1 = 0, e2 = 0;
+        if (diag)
+        {
+            while (glGetError() != GL_NO_ERROR) {}
+            rs = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+            ds = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+            glReadPixels(srcW / 2, srcH / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, sp);
+            e1 = glGetError();
+        }
+        gl_BlitFramebuffer(0, 0, srcW, srcH, 0, 0, c->w, c->h, GL_COLOR_BUFFER_BIT,
+                           (srcW == c->w && srcH == c->h) ? GL_NEAREST : GL_LINEAR);
+        if (diag)
+        {
+            e2 = glGetError();
+            gl_BindFramebuffer(GL_READ_FRAMEBUFFER, s_dstFbo);
+            glReadPixels(c->w / 2, c->h / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, dp);
+            printf("[VR-DIAG] chain %p src tex %u %dx%d -> %dx%d img %u fmt 0x%llX | status r=0x%X d=0x%X | src %u,%u,%u,%u dst %u,%u,%u,%u | err read=0x%X blit=0x%X after=0x%X\n",
+                   (void*)c, (unsigned)src, srcW, srcH, c->w, c->h, (unsigned)c->img[idx].image,
+                   (unsigned long long)s_format, (unsigned)rs, (unsigned)ds,
+                   sp[0], sp[1], sp[2], sp[3], dp[0], dp[1], dp[2], dp[3],
+                   (unsigned)e1, (unsigned)e2, (unsigned)glGetError());
+            diagCount++;
+        }
+    }
     GlRestore(&st);
 
     p_xrReleaseSwapchainImage(c->sc, &ri);
@@ -445,6 +508,28 @@ static void PollEvents(void)
                 s_lost      = 1;
                 s_running   = 0;
                 s_frameOpen = 0;
+            }
+        }
+        else if (ev.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED)
+        {
+            static PFN_xrGetCurrentInteractionProfile getProf = NULL;
+            static PFN_xrPathToString                 pathStr = NULL;
+            int h;
+            if (!getProf)
+                p_xrGetInstanceProcAddr(s_inst, "xrGetCurrentInteractionProfile", (PFN_xrVoidFunction*)&getProf);
+            if (!pathStr)
+                p_xrGetInstanceProcAddr(s_inst, "xrPathToString", (PFN_xrVoidFunction*)&pathStr);
+            for (h = 0; h < 2; h++)
+            {
+                XrPath hp = XR_NULL_PATH;
+                XrInteractionProfileState ps = { XR_TYPE_INTERACTION_PROFILE_STATE };
+                char buf[256] = "(none)";
+                uint32_t len = 0;
+                p_xrStringToPath(s_inst, h ? "/user/hand/right" : "/user/hand/left", &hp);
+                if (getProf && XR_SUCCEEDED(getProf(s_session, hp, &ps)) &&
+                    ps.interactionProfile != XR_NULL_PATH && pathStr)
+                    pathStr(s_inst, ps.interactionProfile, sizeof(buf), &len, buf);
+                printf("[VR-INPUT] interaction profile changed: %s hand = %s\n", h ? "right" : "left", buf);
             }
         }
         else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING)
@@ -538,7 +623,29 @@ static void EndFrameIfOpen(void)
         ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
         ei.layerCount           = nLayers;
         ei.layers               = layers;
-        p_xrEndFrame(s_session, &ei);
+        {
+            static int diagFrame = 0, diagCount = 0;
+            XrResult er = p_xrEndFrame(s_session, &ei);
+            if (diagCount < 40 && ((++diagFrame % 360) == 1 || XR_FAILED(er)))
+            {
+                int nOvl = 0;
+                for (i = 0; i < VRXR_MAX_OVERLAYS; i++)
+                    if (s_ovls[i].used) nOvl++;
+                printf("[VR-DIAG] endFrame r=%d layers=%u (proj=%d quads=%u) shouldRender=%d overlays used=%d",
+                       (int)er, nLayers, (int)(nLayers > nQuads), nQuads, (int)s_fs.shouldRender, nOvl);
+                for (i = 0; i < VRXR_MAX_OVERLAYS; i++)
+                {
+                    int tw = 0, th = 0;
+                    if (!s_ovls[i].used) continue;
+                    if (s_ovls[i].tex) TexSize(s_ovls[i].tex, &tw, &th);
+                    printf(" [%d vis=%d tex=%u %dx%d w=%.2f pos %.2f,%.2f,%.2f]", i, s_ovls[i].visible,
+                           (unsigned)s_ovls[i].tex, tw, th, s_ovls[i].widthM,
+                           s_ovls[i].pose.position.x, s_ovls[i].pose.position.y, s_ovls[i].pose.position.z);
+                }
+                printf("\n");
+                diagCount++;
+            }
+        }
     }
 
     s_eyeSubmitted[0] = s_eyeSubmitted[1] = 0;
@@ -896,6 +1003,43 @@ static EVROverlayError OPENVR_FNTABLE_CALLTYPE Ovl_SetOverlayTexture(VROverlayHa
 
 /* ---- init ----------------------------------------------------------------------- */
 
+#if defined(__ANDROID__)
+/* Quest: the Khronos Android loader ships in the APK (lib/arm64-v8a) and must
+ * be told the JavaVM and the activity before anything else. */
+static int LoadXr(void)
+{
+    PFN_xrInitializeLoaderKHR initLoader = NULL;
+    JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+    JavaVM* vm  = NULL;
+
+    s_loader = dlopen("libopenxr_loader.so", RTLD_NOW);
+    if (!s_loader)
+    {
+        printf("[VR-XR] libopenxr_loader.so not found (%s)\n", dlerror());
+        return 0;
+    }
+    p_xrGetInstanceProcAddr = (PFN_xrGetInstanceProcAddr)dlsym(s_loader, "xrGetInstanceProcAddr");
+    if (!p_xrGetInstanceProcAddr || !env) return 0;
+    (*env)->GetJavaVM(env, &vm);
+
+    p_xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+                            (PFN_xrVoidFunction*)&initLoader);
+    if (initLoader)
+    {
+        XrLoaderInitInfoAndroidKHR li = { XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR };
+        li.applicationVM      = vm;
+        li.applicationContext = SDL_AndroidGetActivity();
+        if (XR_FAILED(initLoader((const XrLoaderInitInfoBaseHeaderKHR*)&li)))
+        {
+            printf("[VR-XR] xrInitializeLoaderKHR failed\n");
+            return 0;
+        }
+    }
+    p_xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrCreateInstance",
+                            (PFN_xrVoidFunction*)&p_xrCreateInstance);
+    return p_xrCreateInstance != NULL;
+}
+#else
 static int LoadXr(void)
 {
     s_loader = LoadLibraryA("openxr_loader.dll");
@@ -912,6 +1056,7 @@ static int LoadXr(void)
                             (PFN_xrVoidFunction*)&p_xrCreateInstance);
     return p_xrCreateInstance != NULL;
 }
+#endif
 
 static int LoadInstanceFuncs(void)
 {
@@ -970,10 +1115,25 @@ static int CreateSpaces(void)
 
 static int PickFormat(void)
 {
-    int64_t fmts[64];
+    int64_t fmts[256];
     uint32_t n = 0, i;
+    XrResult r;
 
-    if (XR_FAILED(p_xrEnumerateSwapchainFormats(s_session, 64, &n, fmts)) || n == 0) return 0;
+    /* two-call idiom: the Quest runtime lists more formats than a fixed
+     * small buffer holds (XR_ERROR_SIZE_INSUFFICIENT) */
+    r = p_xrEnumerateSwapchainFormats(s_session, 0, &n, NULL);
+    if (XR_FAILED(r) || n == 0)
+    {
+        VrOvr_Log("[VR-XR] xrEnumerateSwapchainFormats(count) failed (%d, n=%u)\n", (int)r, n);
+        return 0;
+    }
+    if (n > 256) n = 256;
+    r = p_xrEnumerateSwapchainFormats(s_session, n, &n, fmts);
+    if (XR_FAILED(r) || n == 0)
+    {
+        VrOvr_Log("[VR-XR] xrEnumerateSwapchainFormats failed (%d, n=%u)\n", (int)r, n);
+        return 0;
+    }
     s_format = fmts[0];
     for (i = 0; i < n; i++) if (fmts[i] == GL_RGBA8)        s_format = GL_RGBA8;
     for (i = 0; i < n; i++) if (fmts[i] == GL_SRGB8_ALPHA8) s_format = GL_SRGB8_ALPHA8;
@@ -1038,6 +1198,18 @@ static void CreateActions(void)
             return;
         }
     }
+    /* Same paths exist on Touch Plus (Quest 3 / 3S) */
+    if (s_haveTouchPlus)
+    {
+        XrInteractionProfileSuggestedBinding pb = { XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+        XrPath plus;
+        p_xrStringToPath(s_inst, "/interaction_profiles/meta/touch_controller_plus", &plus);
+        pb.interactionProfile     = plus;
+        pb.countSuggestedBindings = VRXR_ACT_COUNT;
+        pb.suggestedBindings      = sb;
+        XrResult r = p_xrSuggestInteractionProfileBindings(s_inst, &pb);
+        printf("[VR-XR] Touch Plus bindings %s (%d)\n", XR_FAILED(r) ? "rejected" : "ok", (int)r);
+    }
 
     {
         XrSessionActionSetsAttachInfo ai = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
@@ -1099,19 +1271,44 @@ static int ActVec2(int i, float* x, float* y)
 /* Read the controllers into *out (valid = 0 when unfocused or absent). */
 void VrXr_PollInput(VrPadState* out)
 {
+    static int diagN = 0, lastSync = 12345, lastValid = -1;
+    XrResult sr;
+
     memset(out, 0, sizeof(*out));
-    if (!s_actReady || !s_running || s_lost) return;
+    if (!s_actReady || !s_running || s_lost)
+    {
+        if (diagN < 4 && (++diagN, 1))
+            printf("[VR-INPUT] skipped: actReady=%d running=%d lost=%d\n", s_actReady, s_running, s_lost);
+        return;
+    }
 
     {
         XrActiveActionSet as = { s_actSet, XR_NULL_PATH };
         XrActionsSyncInfo si = { XR_TYPE_ACTIONS_SYNC_INFO };
         si.countActiveActionSets = 1;
         si.activeActionSets      = &as;
-        if (p_xrSyncActions(s_session, &si) != XR_SUCCESS) return;  /* not focused */
+        sr = p_xrSyncActions(s_session, &si);
+        if ((int)sr != lastSync)
+        {
+            printf("[VR-INPUT] xrSyncActions -> %d (state %d)\n", (int)sr, (int)s_state);
+            lastSync = (int)sr;
+        }
+        if (sr != XR_SUCCESS) return;  /* not focused */
     }
 
     out->valid  = ActVec2(VRXR_ACT_LSTICK, &out->lx, &out->ly);
     out->valid |= ActVec2(VRXR_ACT_RSTICK, &out->rx, &out->ry);
+    if (out->valid != lastValid)
+    {
+        XrActionStateGetInfo  gi = { XR_TYPE_ACTION_STATE_GET_INFO };
+        XrActionStateBoolean  bs = { XR_TYPE_ACTION_STATE_BOOLEAN };
+        XrResult br;
+        gi.action = s_act[VRXR_ACT_A];
+        br = p_xrGetActionStateBoolean(s_session, &gi, &bs);
+        printf("[VR-INPUT] sticks valid=%d | button A get=%d active=%d\n",
+               out->valid, (int)br, (int)bs.isActive);
+        lastValid = out->valid;
+    }
     out->lt     = ActFloat(VRXR_ACT_LTRIG);
     out->rt     = ActFloat(VRXR_ACT_RTRIG);
     out->lgrip  = ActFloat(VRXR_ACT_LGRIP);
@@ -1153,17 +1350,56 @@ static void BuildTables(void)
  * Returns 1 with OpenVR-shaped tables, 0 = no OpenXR VR (game runs flat). */
 int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
 {
+#if defined(__ANDROID__)
+    const char* exts[3] = { XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
+                            XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME, NULL };
+    uint32_t nExts = 2;
+    XrInstanceCreateInfoAndroidKHR aci = { XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR };
+#else
     const char* exts[] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+    uint32_t nExts = 1;
+#endif
 
     if (!LoadXr()) return 0;
+
+#if defined(__ANDROID__)
+    /* Quest 3 / 3S controllers are "Touch Plus": offer their own profile
+     * when the runtime has it, next to the classic Touch bindings. */
+    {
+        PFN_xrEnumerateInstanceExtensionProperties enumExt = NULL;
+        XrExtensionProperties props[128];
+        uint32_t n = 0, i;
+        p_xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrEnumerateInstanceExtensionProperties",
+                                (PFN_xrVoidFunction*)&enumExt);
+        for (i = 0; i < 128; i++) { props[i].type = XR_TYPE_EXTENSION_PROPERTIES; props[i].next = NULL; }
+        if (enumExt && XR_SUCCEEDED(enumExt(NULL, 128, &n, props)))
+            for (i = 0; i < n; i++)
+                if (strcmp(props[i].extensionName, XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME) == 0)
+                {
+                    exts[nExts++] = XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME;
+                    s_haveTouchPlus = 1;
+                }
+        VrOvr_Log("[VR-XR] Touch Plus profile: %s\n", s_haveTouchPlus ? "yes" : "no");
+    }
+#endif
 
     {
         XrInstanceCreateInfo ci = { XR_TYPE_INSTANCE_CREATE_INFO };
         strncpy(ci.applicationInfo.applicationName, "Silent Hill VR", XR_MAX_APPLICATION_NAME_SIZE - 1);
         strncpy(ci.applicationInfo.engineName, "PsyCross", XR_MAX_ENGINE_NAME_SIZE - 1);
         ci.applicationInfo.apiVersion = XR_API_VERSION_1_0;
-        ci.enabledExtensionCount = 1;
+        ci.enabledExtensionCount = nExts;
         ci.enabledExtensionNames = exts;
+#if defined(__ANDROID__)
+        {
+            JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+            JavaVM* vm  = NULL;
+            (*env)->GetJavaVM(env, &vm);
+            aci.applicationVM       = vm;
+            aci.applicationActivity = SDL_AndroidGetActivity();
+            ci.next = &aci;
+        }
+#endif
         XrResult r = p_xrCreateInstance(&ci, &s_inst);
         if (XR_FAILED(r))
         {
@@ -1201,6 +1437,36 @@ int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
         s_recH = v[0].recommendedImageRectHeight;
     }
 
+#if defined(__ANDROID__)
+    {
+        /* SDL's EGL context, current on this (the game's render) thread. */
+        XrGraphicsRequirementsOpenGLESKHR   req = { XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR };
+        XrGraphicsBindingOpenGLESAndroidKHR gb  = { XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR };
+        XrSessionCreateInfo                 sci = { XR_TYPE_SESSION_CREATE_INFO };
+        EGLint  cfgId = 0, nCfg = 0;
+        EGLint  attrs[] = { EGL_CONFIG_ID, 0, EGL_NONE };
+
+        p_xrGetOpenGLESGraphicsRequirementsKHR(s_inst, s_sysId, &req);
+        gb.display = eglGetCurrentDisplay();
+        gb.context = eglGetCurrentContext();
+        if (gb.display == EGL_NO_DISPLAY || gb.context == EGL_NO_CONTEXT)
+        {
+            printf("[VR-XR] no current EGL context\n");
+            return 0;
+        }
+        eglQueryContext(gb.display, gb.context, EGL_CONFIG_ID, &cfgId);
+        attrs[1] = cfgId;
+        eglChooseConfig(gb.display, attrs, &gb.config, 1, &nCfg);
+        sci.next     = &gb;
+        sci.systemId = s_sysId;
+        XrResult r = p_xrCreateSession(s_inst, &sci, &s_session);
+        if (XR_FAILED(r))
+        {
+            printf("[VR-XR] xrCreateSession failed (%d)\n", (int)r);
+            return 0;
+        }
+    }
+#else
     {
         XrGraphicsRequirementsOpenGLKHR req = { XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR };
         XrGraphicsBindingOpenGLWin32KHR gb  = { XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR };
@@ -1223,12 +1489,18 @@ int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
             return 0;
         }
     }
+#endif
 
-    if (!LoadGl() || !CreateSpaces() || !PickFormat()) return 0;
+    if (!LoadGl())       { VrOvr_Log("[VR-XR] GL framebuffer functions missing\n"); return 0; }
+    if (!CreateSpaces()) { VrOvr_Log("[VR-XR] reference space creation failed\n"); return 0; }
+    if (!PickFormat())   return 0;
     CreateActions();
     if (!ChainEnsure(&s_eyeChain[0], (int)s_recW, (int)s_recH) ||
         !ChainEnsure(&s_eyeChain[1], (int)s_recW, (int)s_recH))
+    {
+        VrOvr_Log("[VR-XR] eye swapchain %ux%u creation failed\n", s_recW, s_recH);
         return 0;
+    }
 
     /* Wait (bounded) for READY so the first frame can locate the views -
      * vr_full.c reads the fov once, at its own init. */
@@ -1237,7 +1509,7 @@ int VrXr_Init(void** sysTbl, void** compTbl, void** ovlTbl)
         while (!s_running && !s_lost && SDL_GetTicks() - t0 < 5000)
         {
             PollEvents();
-            if (!s_running) Sleep(10);
+            if (!s_running) SDL_Delay(10);
         }
         if (!s_running)
         {

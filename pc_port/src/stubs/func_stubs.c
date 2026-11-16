@@ -54,9 +54,12 @@ TIM_IMAGE* ReadTIM(TIM_IMAGE* timimg)
     return timimg;
 }
 
-/* SDL_main - SDL2main.a calls this; redirect to our actual main */
+/* SDL_main - SDL2main.a calls this; redirect to our actual main.
+ * Quest: SDL_main.h already renames main() to SDL_main for SDLActivity. */
+#if !defined(__ANDROID__)
 extern int main(int argc, char* argv[]);
 int SDL_main(int argc, char* argv[]) { return main(argc, argv); }
+#endif
 
 void CdMix() { }
 void CdRead2() { }

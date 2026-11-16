@@ -30,7 +30,12 @@
 =============================================================================
 */
 
+#if !defined(__ANDROID__)
 #include <windows.h>
+#else
+#include <strings.h>
+#define _stricmp strcasecmp
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,11 +44,15 @@
 #include <math.h>
 
 #include <SDL.h>
-#include <SDL_opengl.h>
+#include "vr_gl.h"
 
 /* Official Valve C API header - correct ABI guaranteed. */
 #include "openvr_capi.h"
 #include "vr_input.h"
+
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 /* ---- diagnostics log ---------------------------------------------------- */
 
@@ -67,7 +76,11 @@ void VrOvr_Log(const char* fmt, ...)
         f = fopen("SilentHillVR.log", "w");
     }
     va_start(ap, fmt);
+#if defined(__ANDROID__)
+    __android_log_vprint(ANDROID_LOG_INFO, "SilentHillVR", fmt, ap);
+#else
     vprintf(fmt, ap);
+#endif
     va_end(ap);
     if (f)
     {
@@ -77,6 +90,10 @@ void VrOvr_Log(const char* fmt, ...)
         fflush(f);
     }
 }
+
+#if defined(__ANDROID__)
+#define printf VrOvr_Log
+#endif
 
 /* ---- reading the finished game frame ----------------------------------- */
 
@@ -170,7 +187,11 @@ typedef void     (*PFN_VR_ShutdownInternal)(void);
 typedef intptr_t (*PFN_VR_GetGenericInterface)(const char* name, EVRInitError* err);
 typedef int      (*PFN_VR_IsHmdPresent)(void);
 
+#if defined(__ANDROID__)
+static void* s_dll = NULL;   /* Quest: OpenXR only, never loaded */
+#else
 static HMODULE s_dll = NULL;
+#endif
 static PFN_VR_InitInternal        p_Init = NULL;
 static PFN_VR_ShutdownInternal    p_Shutdown = NULL;
 static PFN_VR_GetGenericInterface p_GetIface = NULL;
@@ -193,6 +214,7 @@ static int s_runtime = VR_RUNTIME_OPENVR;
  * and GL context go): end the VR session, then arm a watchdog - a runtime
  * that still holds a thread in its DLL detach would otherwise leave the
  * process running invisibly after F4 / closing the window. */
+#if !defined(__ANDROID__)
 static DWORD WINAPI VrOvr_ExitWatchdog(LPVOID unused)
 {
     (void)unused;
@@ -200,11 +222,14 @@ static DWORD WINAPI VrOvr_ExitWatchdog(LPVOID unused)
     TerminateProcess(GetCurrentProcess(), 0);
     return 0;
 }
+#endif
 
 static void VrOvr_Shutdown(void)
 {
+#if !defined(__ANDROID__)
     HANDLE t = CreateThread(NULL, 0, VrOvr_ExitWatchdog, NULL, 0, NULL);
     if (t) CloseHandle(t);
+#endif
 
     if (s_runtime == VR_RUNTIME_OPENXR)
     {
@@ -227,6 +252,14 @@ void VrOvr_ChooseRuntime(void)
     };
     SDL_MessageBoxData box;
     int choice = -1;
+
+#if defined(__ANDROID__)
+    /* Quest standalone: the headset's own OpenXR runtime, nothing to ask. */
+    (void)buttons; (void)box; (void)choice;
+    s_runtime = VR_RUNTIME_OPENXR;
+    VrOvr_Log("[VR-OVR] runtime: OpenXR (Quest)\n");
+    return;
+#endif
 
     /* SH1VR_RUNTIME=openxr|openvr skips the question - the OpenXR simulator
      * (K:\sh1vr\xrsim64) launches the game unattended. */
@@ -361,6 +394,9 @@ static void VrOvr_TryInit(void)
         return;
     }
 
+#if defined(__ANDROID__)
+    printf("[VR-OVR] OpenVR is not available on Quest\n");
+#else
     s_dll = LoadLibraryA("openvr_api.dll");
     if (!s_dll)
     {
@@ -413,6 +449,7 @@ static void VrOvr_TryInit(void)
     s_vrReady = 1;
     printf("[VR-OVR] OpenVR ready (poses via %s)\n",
            s_usePoses ? "OpenVR in-process" : "file bridge");
+#endif
 }
 
 /* ---- floating screen ------------------------------------------------------ */
@@ -1131,11 +1168,32 @@ static void VrOvr_PushFrame(void)
 
     {
         int rw, rh, prevRead;
+#if defined(__ANDROID__)
+        static int diagFrame = 0, diagCount = 0;
+        int diag = (diagCount < 8 && (++diagFrame % 120) == 1);   /* Quest bring-up: reads pixels back */
+#else
+        static int diagCount = 0;
+        const int  diag = 0;
+#endif
         VrOvr_SceneReadBegin(&rw, &rh, &prevRead);
+        if (diag)
+        {
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            GLint rd = 0;
+            while (glGetError() != GL_NO_ERROR) {}
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &rd);
+            glReadPixels(w / 2, h / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+            printf("[VR-DIAG] mono src: inFbo=%d internalFBO=%u native=%d size %dx%d (read %dx%d) readFB=%d status=0x%X centre=%u,%u,%u,%u err=0x%X\n",
+                   VrOvr_SceneInFbo(), (unsigned)g_internalFBO, g_PcNativeRender, w, h, rw, rh, (int)rd,
+                   (unsigned)glCheckFramebufferStatus(GL_READ_FRAMEBUFFER),
+                   px[0], px[1], px[2], px[3], (unsigned)glGetError());
+        }
         glBindTexture(GL_TEXTURE_2D, s_sbsTex);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+        if (diag) printf("[VR-DIAG] mono copy err=0x%X tex=%u\n", (unsigned)glGetError(), (unsigned)s_sbsTex);
         glBindTexture(GL_TEXTURE_2D, 0);
         VrOvr_SceneReadEnd(prevRead);
+        if (diag) diagCount++;
     }
 
     VrOvr_ApplyOverlaySampling();

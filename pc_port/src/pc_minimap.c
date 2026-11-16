@@ -975,6 +975,19 @@ void Pc_MinimapVrSheetDraw(GsOT* ot)
     face = (hand >= 0) ? VrIk_MapSheetFrame(hand, c, r, u, t, &cosView)
                        : VrIk_MapHolsterFrame(c, r, u, t, &cosView);
     if (face == 0) return;
+    if (hand >= 0)
+    {
+        /* the sheet's shape for the VR hand's depth test (vr_hands.c):
+         * corners centre -/+ right -/+ up, two triangles */
+        extern void VrHands_OccluderSet(int slot, const float* worldPts, int nVerts);
+        static const int cs[6][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 } };
+        float pts[18];
+        int   q, a;
+        for (q = 0; q < 6; q++)
+            for (a = 0; a < 3; a++)
+                pts[q * 3 + a] = c[a] + r[a] * (float)cs[q][0] + u[a] * (float)cs[q][1];
+        VrHands_OccluderSet(1, pts, 6);
+    }
 
     /* Matte paper: brightness from the view angle alone (no specular), never
      * so dark the map stops reading. 128 = the texture as it is. */
