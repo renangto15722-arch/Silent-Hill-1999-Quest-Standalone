@@ -220,6 +220,7 @@ s_PcConfig g_PcConfig = {
     .vrHeadLock          = 0,
     .vrHolsterOn         = 1,
     .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
+    .vrCameraHeight      = 0.0f,
     .vrPlayerHeight      = 0.0f,
     .vrGrabRadius        = 0.35f,  /* m */
     .vrWheelSize         = 100.0f,
@@ -1306,6 +1307,11 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_head_lock") == 0)
         {
             g_PcConfig.vrHeadLock = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_camera_height") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrCameraHeight = (v < -50.0f) ? -50.0f : (v > 50.0f) ? 50.0f : v;
         }
         else if (strcmp(key, "vr_player_height") == 0)
         {

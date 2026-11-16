@@ -1176,6 +1176,25 @@ void Gfx_ItemScreens_DrawInit(u32* selectedItemId) // 0x8004F764
         "Name:"
     };
 
+#if defined(SH_PC_PORT) && defined(__ANDROID__)
+    { /* TEMP DIAG: inventory drawn outside the inventory (Quest) */
+        extern void Pc_DiagBacktrace(const char* tag);
+        static int s_bt = 0;
+        if (g_GameWork.gameState != GameState_InventoryScreen && s_bt < 3)
+        {
+            extern void VrOvr_Log(const char* fmt, ...);
+            VrOvr_Log("[VR-BT] %s in gameState %d sysState %d steps %d/%d/%d\n", "DrawInit",
+                      (int)g_GameWork.gameState, (int)g_SysWork.sysState,
+                      (int)g_GameWork.gameStateSteps[0], (int)g_GameWork.gameStateSteps[1], (int)g_GameWork.gameStateSteps[2]);
+            Pc_DiagBacktrace("DrawInit");
+            s_bt++;
+        }
+        /* Quest: the inventory kept drawing over gameplay. It is only ever
+         * meant for the inventory state, so nothing is drawn outside it. */
+        if (g_GameWork.gameState != GameState_InventoryScreen)
+            return;
+    }
+#endif
     Gfx_StringSetColor(StringColorId_White);
 
     // In inventory.
@@ -2080,6 +2099,21 @@ void Gfx_Inventory_ItemDescriptionDraw(s32* selectedItemId) // 0x8005192C
             idx = g_SysWork.playerCombat.weaponInventoryIdx;
             break;
     }
+#if defined(SH_PC_PORT) && defined(__ANDROID__)
+    { /* TEMP DIAG: inventory drawn outside the inventory (Quest) */
+        extern void Pc_DiagBacktrace(const char* tag);
+        static int s_bt = 0;
+        if (g_GameWork.gameState != GameState_InventoryScreen && s_bt < 3)
+        {
+            extern void VrOvr_Log(const char* fmt, ...);
+            VrOvr_Log("[VR-BT] %s in gameState %d sysState %d steps %d/%d/%d\n", "ItemDesc",
+                      (int)g_GameWork.gameState, (int)g_SysWork.sysState,
+                      (int)g_GameWork.gameStateSteps[0], (int)g_GameWork.gameStateSteps[1], (int)g_GameWork.gameStateSteps[2]);
+            Pc_DiagBacktrace("ItemDesc");
+            s_bt++;
+        }
+    }
+#endif
 
     if (D_800AE185 != INV_ITEM_GROUP(g_SavegamePtr->items[idx].id_0) - 1 ||
         D_800AE186 != INV_ITEM_GROUP_ID(g_SavegamePtr->items[idx].id_0))

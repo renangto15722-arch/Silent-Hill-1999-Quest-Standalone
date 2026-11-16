@@ -383,6 +383,7 @@ typedef struct {
     float vrEyeRes;         /* Full VR: eye images up to this % of the window's resolution, 100..200 (vr_eye_res); never more than the headset needs */
     float vrWeaponSize;     /* VR: size of the weapons' close-up models in the hand and holsters, %, 50..200 (vr_weapon_size; vr_weapon_hd.c) */
     int   pcOptionsLastPage; /* the PC Options page last shown, where VR's held Y opens it (pc_options_last_page; options.c) */
+    float vrCameraHeight;   /* VR: first-person eye raised (+) / lowered (-) in cm, -50..50 (vr_camera_height; game_main.c) */
     float vrPlayerHeight;   /* VR: your height in cm - Harry's body is scaled from his feet to it (as you see it, World_Scale included); 0 = his own size (vr_player_height) */
     float vrGripEdit[6];    /* VR: the EQUIPPED weapon's grip offset, as the VR Weapon Grip page edits it: forward, up, right (cm), pitch, yaw, roll (deg), controller frame (vr_item_*) */
     int   vrGunSight;       /* VR: gun sight, 0 = none, 1 = red dot, 2 = laser beam + dot (vr_gun_sight; vr_crosshair.c) */

@@ -918,6 +918,8 @@ static void Pc_TpsCamera_Apply(void)
             s32     sYaw   = Math_Sin(eyeYaw);
             s32     cYaw   = Math_Cos(eyeYaw);
             VECTOR3 eyeLocal = g_PcFpsOffset;
+            /* Camera_Height_cm (VR_Tuning page): cm -> Q12 metres; PSX +Y is down */
+            eyeLocal.vy -= (s32)(g_PcConfig.vrCameraHeight * 4096.0f / 100.0f);
 
             /* Head-follow: ride Harry's animated head bone so the view breathes and
              * sways with his idle animation instead of his body sliding out from

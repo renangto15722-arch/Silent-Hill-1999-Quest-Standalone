@@ -316,6 +316,7 @@ static void Scan_Zip(const char* path)
     if (!mz_zip_reader_init_file(&zip, path, 0))
     {
         SH_DBG("[TEXPACK] %s: not a readable zip", path);
+        printf("[TEXPACK] %s: not a readable zip\n", path);
         return;
     }
 
@@ -520,9 +521,12 @@ static void Scan_Once(void)
     g_scanned = 1;
     if (g_zipMx == NULL) g_zipMx = SDL_CreateMutex();
 
-    if (!g_PcConfig.texturePacks) return;
+    if (!g_PcConfig.texturePacks) { printf("[TEXPACK] texture packs off in config\n"); return; }
 
     Scan_Dir(TEXPACK_DIR, 0);
+    /* always reported (stdout): is the HD pack loaded at all? */
+    printf("[TEXPACK] %d replacement entries from %d zip pack(s) in %s\n",
+           g_entryCount, g_zipCount, TEXPACK_DIR);
 
     LoadOrder_Read();
     if (g_loadOrderCount > 0)

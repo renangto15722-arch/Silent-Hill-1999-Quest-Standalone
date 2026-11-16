@@ -126,7 +126,7 @@ static s32 s_pcOptDirect = 0;
  * from PCOPT_LINE_BASE_Y on the 240-line screen) starting at g_PcOptScroll,
  * kept around the selection by PcOpt_ScrollUpdate. Every fixed page fits, so
  * only the VR Objects lists ever scroll. */
-#define PCOPT_VISIBLE 12
+#define PCOPT_VISIBLE 11
 static s32 g_PcOptScroll = 0;
 
 void Pc_Options_RequestDirectPc(void)
@@ -135,8 +135,8 @@ void Pc_Options_RequestDirectPc(void)
 }
 
 static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Controls, 3 = Camera, 4 = HUD, 5 = VR, 6 = VR Tuning,
-                                             * 7 = VR Comfort, 8 = VR Body, 9 = VR Objects, 10 = VR Gun Aim, 11 = VR Holsters */
-#define PCOPT_PAGE_COUNT 12
+                                             * 7 = VR Comfort, 8 = VR Objects, 9 = VR Gun Aim, 10 = VR Holsters */
+#define PCOPT_PAGE_COUNT 11
 
 /* Mouse hover moves the selection WITHOUT resetting g_Options_SelectionHighlightTimer:
  * a reset re-arms the LINE_CURSOR_TIMER_MAX gate, which then swallows the click that
@@ -253,9 +253,6 @@ static const int RES_H[] = { 480,  720,  768,  900, 1080, 1440, 2160 };
 #define PC_RES_COUNT ((int)(sizeof(RES_W) / sizeof(RES_W[0])))
 
 static const s_PcOpt PCOPT_G[] = {
-    { "Resolution",     NULL,                           NULL,                   NULL,      0, NULL,      NULL,                          0, PCK_RES    },
-    { "Window_Mode",    &g_PcConfig.fullscreen,         "fullscreen",           VAL_WIN,   3, LBL_WIN,   NULL,                          1, PCK_WINMODE },
-    { "VSync",          &g_PcConfig.vsync,              "vsync",                VAL_VSYNC, 2, LBL_VSYNC, NULL,                          1, PCK_VSYNC   },
     { "Texture_Filter", &g_PcConfig.psxDither,          "texture_filter",       VAL_FILT,  8, LBL_FILT,  NULL,                          1, PCK_FILTER },
     { "PGXP",           &g_PcConfig.usePgxp,            "use_pgxp",             VAL_ONOFF, 2, LBL_ONOFF, &g_PsxUsePgxp,                 1, PCK_INT    },
     { "Antialiasing",   &g_PcConfig.msaaSamples,        "msaa",                 VAL_AA,    4, LBL_AA,    NULL,                          0, PCK_INT    },
@@ -284,7 +281,6 @@ static const s_PcOpt PCOPT_S[] = {
     /* Preload_Chunks moved out: it needs a map reload to take effect and the
      * launcher already exposes it. Disable_Culling takes the slot back -- it
      * applies live, and it pairs with Fog_Strength above for seeing further. */
-    { "Disable_Culling",  &g_PcConfig.disableCulling, "disable_culling",  VAL_ONOFF, 2, LBL_ONOFF, NULL, 1, PCK_INT  },
     { "FPS_Limit",        &g_PcConfig.fpsCap,         "fps_cap",          VAL_FPS,   5, LBL_FPS,   NULL, 1, PCK_INT  },
     { "FMV_Movie_Vol",    NULL, "fmv_volume",           NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.fmvVolume,           &g_PcFmvVolume,             0.0f, 1.0f, 0.05f },
     /* Rain and snow step once per rendered frame at 60, or on the original
@@ -301,15 +297,12 @@ static const s_PcOpt PCOPT_S[] = {
 /* Page 3 (Controls): the 2D screen-relative control toggles + look sensitivities
  * and the invert toggles. (The New-Game start Map row now lives on page 4.) */
 static const s_PcOpt PCOPT_C[] = {
-    { "2D_Controls",       &g_PcConfig.control2d,        "control_2d",             VAL_ONOFF, 2, LBL_ONOFF, NULL, 1, PCK_INT },
     /* control_2d_snap is config-only now — the default turn-into-the-direction 2D
      * control is what players expect, so the in-game toggle was dropped. The key
      * still loads from config.cfg (pc_config.c) for anyone who wants instant snap. */
-    { "Mouse_Sensitivity", NULL, "mouse_sensitivity",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.mouseSensitivity,      NULL, 0.1f, 4.0f, 0.1f },
     { "Pad_Sensitivity",   NULL, "controller_sensitivity", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.controllerSensitivity, NULL, 0.1f, 4.0f, 0.1f },
     /* The three per-camera FOVs moved to the Camera page (grouped with the aim/
      * camera options) once OTS got its own FOV -- the Controls page was full. */
-    { "Invert_Mouse_Y",    &g_PcConfig.invertMouseY,      "invert_mouse_y",         VAL_ONOFF, 2, LBL_ONOFF, NULL, 1, PCK_INT },
     { "Invert_Pad_Y",      &g_PcConfig.invertControllerY, "invert_controller_y",    VAL_ONOFF, 2, LBL_ONOFF, NULL, 1, PCK_INT },
     /* A graphics option living on the Controls page purely for room: 11 rows is
      * the real ceiling, not the 12 the Graphics comment above assumes, and this
@@ -375,7 +368,6 @@ static const s_PcOpt PCOPT_V[] = {
     { "Game_View_Mode",    &g_PcConfig.vrGameViewMode,     "vr_game_view_mode",     VAL_VIEWMODE, 3, LBL_VIEWMODE, NULL, 1, PCK_INT },
     { "Cutscene_View",     &g_PcConfig.vrCutsceneViewMode, "vr_cutscene_view_mode", VAL_CUTVIEW,  2, LBL_CUTVIEW,  NULL, 1, PCK_INT },
     { "Auto_Screen_UI",    &g_PcConfig.vrAutoScreen,       "vr_auto_screen",        VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
-    { "Headset_Preset",    &g_PcConfig.vrHeadsetPreset,    "vr_headset_preset",     VAL_HMD,      7, LBL_HMD,      NULL, 1, PCK_PRESET },
     { "VR_Tracking",       &g_PcConfig.vrEnabled,          "vr_enabled",            VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
     { "Positional_(6DOF)", &g_PcConfig.vrPositional,       "vr_positional",         VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
     { "Cutscene_Tracking", &g_PcConfig.vrTrackCutscenes,   "vr_track_cutscenes",    VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
@@ -397,7 +389,8 @@ static const s_PcOpt PCOPT_V2[] = {
     { "World_Scale",       NULL, "vr_scale",              NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScale,          NULL, 0.5f, 2.0f, 0.05f },
     { "Roomscale_Scale",   NULL, "vr_roomscale_scale",    NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrRoomscaleScale, NULL, 0.25f, 4.0f, 0.25f },
     { "Stereo_Depth",      NULL, "vr_stereo_depth",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrStereoDepth,    NULL, 0.005f, 0.15f, 0.005f },
-    { "Stereo_Converge",   NULL, "vr_stereo_convergence", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrStereoConv,     NULL, -100.0f, 100.0f, 5.0f },
+    /* Camera Height: raises (+) or lowers (-) the first-person eye, cm (game_main.c FPS eye) */
+    { "Camera_Height_cm",  NULL, "vr_camera_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrCameraHeight,   NULL, -50.0f, 50.0f, 1.0f },
     { "Screen_Width",      NULL, "vr_screen_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScreenWidth,    NULL, 0.5f, 8.0f, 0.1f },
     { "Screen_Distance",   NULL, "vr_screen_distance",    NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrScreenDistance, NULL, 0.5f, 10.0f, 0.25f },
     /* 2D Screen Size: angular size of the 2D interface panel (subtitles,
@@ -432,17 +425,6 @@ static const s_PcOpt PCOPT_VC[] = {
     { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
 };
 
-/* Page 9: VR Body (pc_port/src/vr_ik.c): head lock and the player's height
- * (holsters). The hands are the GTA SA VR hands (vr_hands.c), no settings. */
-static const s_PcOpt PCOPT_VB[] = {
-    { "Head_Lock",         &g_PcConfig.vrHeadLock,         "vr_head_lock",          VAL_ONOFF,    2, LBL_ONOFF,    NULL, 1, PCK_INT },
-    /* Player Height: your height in cm; Harry is scaled from his feet to it.
-     * 0 = his own size. Head Height still places the camera. */
-    { "Player_Height_cm",  NULL, "vr_player_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrPlayerHeight,   NULL, 0.0f, 220.0f, 1.0f },
-    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
-    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
-    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
-};
 
 /* Page 10: VR Objects - where every object held in VR sits, by category, in
  * lists that expand and collapse: Weapons (one entry per weapon) and Map.
@@ -606,12 +588,12 @@ static const s_PcOpt PCOPT_VH[] = {
 
 /* Every page by index (g_PcOptionsMenu_Page); 4 = HUD; PCOPT_PAGE_VROBJ is
  * built on demand (PcOpt_VrObjectsBuild). */
-#define PCOPT_PAGE_VROBJ 9
+#define PCOPT_PAGE_VROBJ 8
 #define PCOPT_TABLE(t) { t, (int)(sizeof(t) / sizeof((t)[0])) }
 static const struct { const s_PcOpt* tbl; int count; } PCOPT_PAGES[PCOPT_PAGE_COUNT] = {
     PCOPT_TABLE(PCOPT_G),  PCOPT_TABLE(PCOPT_S),  PCOPT_TABLE(PCOPT_C),  PCOPT_TABLE(PCOPT_T),
     PCOPT_TABLE(PCOPT_H),  PCOPT_TABLE(PCOPT_V),  PCOPT_TABLE(PCOPT_V2), PCOPT_TABLE(PCOPT_VC),
-    PCOPT_TABLE(PCOPT_VB), { NULL, 0 },           PCOPT_TABLE(PCOPT_VA), PCOPT_TABLE(PCOPT_VH),
+    { NULL, 0 },           PCOPT_TABLE(PCOPT_VA), PCOPT_TABLE(PCOPT_VH),
 };
 #undef PCOPT_TABLE
 
@@ -1849,7 +1831,7 @@ static void Options_PcOptionsMenu_EntryStringsDraw(void)
      * pages (6/7, reached with L1/R1) were easy to miss. */
     static const char* const PAGE_HEADINGS[PCOPT_PAGE_COUNT] = {
         "Graphics", "System", "Controls", "Camera", "HUD", "VR", "VR_Tuning", "VR_Comfort",
-        "VR_Body", "VR_Objects", "VR_Gun_Aim", "VR_Holsters"
+        "VR_Objects", "VR_Gun_Aim", "VR_Holsters"
     };
     const char*    HEADING = (g_PcOptionsMenu_Page >= 0 && g_PcOptionsMenu_Page < PCOPT_PAGE_COUNT)
                            ? PAGE_HEADINGS[g_PcOptionsMenu_Page] : "PC_Options";
