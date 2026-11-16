@@ -1,0 +1,20 @@
+// Silent Hill VR - Meta Quest standalone.
+// The native code is android/native/CMakeLists.txt (SDL2 + OpenAL + pc_port).
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "SilentHillVRQuest"
+include ':app'

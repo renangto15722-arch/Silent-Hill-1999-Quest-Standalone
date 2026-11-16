@@ -1,0 +1,104 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Signing key of this app. Reinstalling with another key means uninstalling,
+// and uninstalling deletes Android/data/com.sh1vr.quest (saves, config, disc).
+// keystore/ is never committed: keystore/keystore.properties holds
+// storeFile/storePassword/keyAlias/keyPassword. Without it the build uses the
+// standard Android debug key.
+def shKeyProps = new Properties()
+def shKeyPropsFile = file("${rootProject.projectDir}/keystore/keystore.properties")
+if (shKeyPropsFile.exists()) shKeyPropsFile.withInputStream { shKeyProps.load(it) }
+def shKeystore = shKeyProps['storeFile'] ? file("${rootProject.projectDir}/keystore/" + shKeyProps['storeFile']) : null
+
+android {
+    namespace 'com.sh1vr.quest'
+    compileSdk 36
+    ndkVersion '27.1.12297006'
+
+    defaultConfig {
+        applicationId 'com.sh1vr.quest'
+        minSdk 29
+        targetSdk 32
+        versionCode 1
+        versionName '0.1-quest'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static',
+                          "-DSH_LLVM_NM=${android.ndkDirectory}/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-nm.exe",
+                          "-DSH_LLVM_OBJCOPY=${android.ndkDirectory}/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-objcopy.exe"
+                targets 'SilentHillPC', 'SDL2', 'OpenAL'
+            }
+        }
+    }
+
+    signingConfigs {
+        sh1vr {
+            if (shKeystore != null) {
+                storeFile shKeystore
+                storePassword shKeyProps['storePassword']
+                keyAlias shKeyProps['keyAlias']
+                keyPassword shKeyProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (shKeystore != null) signingConfig signingConfigs.sh1vr
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_BUILD_TYPE=Release'
+                }
+            }
+        }
+        debug {
+            if (shKeystore != null) signingConfig signingConfigs.sh1vr
+            // -O0 cannot hold the headset's frame rate; keep symbols.
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+                }
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "${rootProject.projectDir}/native/CMakeLists.txt"
+            version '3.31.6'
+        }
+    }
+
+    sourceSets {
+        main {
+            // SDLActivity and friends straight from the SDL2 source we link.
+            java.srcDirs += "${rootProject.projectDir}/../deps/SDL2/android-project/app/src/main/java"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    // Khronos OpenXR loader for Android: prebuilt in src/main/jniLibs (the game dlopens it).
+}

@@ -1,4 +1,44 @@
-# Silent Hill - Native PC Port
+# Silent Hill (1999) - Quest Standalone VR
+
+A standalone VR port of the original Silent Hill (1999), bringing the iconic survival horror experience to Meta Quest headsets. Explore the fog-covered town, solve puzzles, and face your nightmares in immersive VR.
+
+It runs natively on the headset (Quest 3, OpenXR, no PC streaming). It is a fork of the [Silent Hill Native PC Port](https://github.com/SlickAmogus/silent-hill-decomp) with a VR layer added; the same code also builds the PC VR version (OpenXR or OpenVR).
+
+**No game data is included.** You need your own Silent Hill USA disc (SLUS-00707) as `.bin` + `.cue`.
+
+## VR features
+
+- Full 3D stereo with head tracking, roomscale and first-person body turn (snap or smooth)
+- VR hands; real holsters on hips, chest and shoulders (grip to draw or holster a weapon)
+- Gun aiming with the controller (laser or dot sight), physical melee swings
+- Physical paper map you hold in your hand
+- Healing/map wheel (hold A), item screen (hold X), options (hold Y)
+- HD weapon models, PGXP precision fixes, menus and item screens shown as panels in the world
+- In-game VR options: Options > VR, VR_Tuning, VR_Comfort, VR_Objects, VR_Holsters
+
+## Install on Quest
+
+Download the release zip, then follow its `README.txt`: install the APK (SideQuest / adb), copy the `SilentHillVR` folder to the root of the Quest's storage, put your disc's `.bin`/`.cue` in `SilentHillVR/gamedata/`, start the game and allow "All files access".
+
+HD textures (optional): a DuckStation-format texture pack `.zip` goes, still zipped, in `SilentHillVR/gamedata/texturemods/`.
+
+## Building
+
+- Quest APK: see [quest/README.md](quest/README.md)
+- PC: see the original port's documentation below (`pc_port/`)
+
+## Credits
+
+- [Silent Hill Native PC Port](https://github.com/SlickAmogus/silent-hill-decomp) and [PsyCross](https://github.com/SlickAmogus/PsyCross) (vendored in `pc_port/PsyCross`)
+- The [Silent Hill decompilation](https://github.com/shdecompilations/silent-hill-decomp) contributors
+- VR hands: UltimateXR BigHands (MIT)
+
+Silent Hill is (c) Konami. The PC port and this VR layer are GPL-3.0; see the licensing notes below.
+
+---
+
+# Original project: Silent Hill - Native PC Port
+
 
   **A native PC port built on the Silent Hill PSX decompilation.** What started as an experiment has become a fully playable port with a large feature set, built-in mod support, an active community, and fan translation/multilingual support. It uses PsyCross (a PsyQ SDK compatibility layer originally written for REDRIVER2) as its hardware abstraction layer, which we [now maintain our own fork of](https://github.com/SlickAmogus/PsyCross).  Care has been taken to leave the original game code intact wherever possible and to work around it where needed, so game logic and feel still match the PSX original. Most if not all enhancements are optional, and always will be.
 

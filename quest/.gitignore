@@ -1,0 +1,10 @@
+deps/
+android/keystore/
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/build-native/
+*.log
+*.apk
