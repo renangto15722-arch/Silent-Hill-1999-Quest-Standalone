@@ -227,7 +227,7 @@ s_PcConfig g_PcConfig = {
         { -16.5f,  -6.0f,  0.0f,  50.0f,  0.0f,   0.0f },   /* 129 steel pipe    */
         {   5.0f,  10.0f, -2.0f,   0.0f,  0.0f,   0.0f },   /* 130 rock drill    */
         {   0.0f,   0.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 131 (none)        */
-        {   0.0f,   0.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 132 hammer        */
+        { -20.0f,  -6.0f, -1.0f,  50.0f,  0.0f,   0.0f },   /* 132 hammer        */
         {   2.0f,   6.0f, -2.0f,   0.0f,  0.0f,   0.0f },   /* 133 chainsaw      */
         {   0.0f,   2.5f, -2.5f,   0.0f,  0.0f,   0.0f },   /* 134 katana        */
         { -10.0f,   2.0f, -1.0f,   0.0f,  0.0f,   0.0f },   /* 135 axe           */
@@ -235,6 +235,16 @@ s_PcConfig g_PcConfig = {
         { -13.0f,   5.0f,  0.0f,  30.0f,  0.0f,   0.0f },   /* 161 hunting rifle */
         { -11.0f,   3.0f, -2.0f,  30.0f,  0.0f,   0.0f },   /* 162 shotgun       */
         {   4.0f,   2.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 163 hyper blaster */
+    },
+    /* Gun aim, tuned on the Quest 3 17/11/2026: forward, up, right (cm), pitch,
+     * yaw (deg). vr_aim_* applies to every gun, vrGunAim (VR_Objects Aim rows,
+     * values 8-12 of vr_grip_<id>) is each gun's own part on top of it. */
+    .vrAimOfs = { 0.5f, 7.0f, -0.5f, -1.0f, -4.0f },
+    .vrGunAim = {
+        [8]  = {  5.0f,  -6.5f,  2.0f, -20.0f, 4.0f },   /* 160 handgun       */
+        [9]  = { 13.0f,   0.0f, -1.0f, -21.0f, 4.0f },   /* 161 hunting rifle */
+        [10] = { 20.0f, -10.0f,  2.0f, -25.0f, 4.0f },   /* 162 shotgun       */
+        [11] = { 19.0f,  -5.0f,  0.0f,  -6.0f, 3.0f },   /* 163 hyper blaster */
     },
     .vrGunSight          = 2,      /* laser beam + dot on every gun */
     .vrMapScale          = 150.0f, /* Quest: the paper map 1.5x (45 x 34 cm), readable at the headset's resolution */
