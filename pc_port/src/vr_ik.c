@@ -984,7 +984,8 @@ static int SlotWorldT(int slot, double t[3])
     for (i = 0; i < 3; i++)
         t[i] = (double)f.cam.t[i] + (double)((i == 1 ? drop : 0.0f) - hw[i] * back +
                                              (body[i][0] * s_holsterSlots[slot].right * H +
-                                              body[i][2] * s_holsterSlots[slot].fwd * H) * rs);
+                                              body[i][2] * (s_holsterSlots[slot].fwd * H +
+                                                            g_PcConfig.vrHolsterFwd * 0.01f)) * rs);   /* + Holster_Forward */
     return 1;
 }
 

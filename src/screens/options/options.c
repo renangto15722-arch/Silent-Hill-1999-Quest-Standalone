@@ -617,6 +617,7 @@ static const s_PcOpt PCOPT_VH[] = {
     { "Weapon_Select",     &g_PcConfig.vrWeaponSelect,     "vr_weapon_select",      VAL_WSELECT,   2, LBL_WSELECT,   NULL, 1, PCK_INT },
     { "Box_Size_cm",       NULL, "vr_hbox_size",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBoxSize,        NULL, 8.0f, 30.0f, 1.0f },
     { "Box_Opacity",       NULL, "vr_hbox_opacity",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBoxOpacity,     NULL, 0.0f, 100.0f, 5.0f },
+    { "Holster_Forward_cm", NULL, "vr_hbox_fwd",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrHolsterFwd,     NULL, -20.0f, 30.0f, 1.0f },
     { "Left_Hip",          &g_PcConfig.vrHolsterSlot[0],   "vr_holster_hip_l",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Right_Hip",         &g_PcConfig.vrHolsterSlot[1],   "vr_holster_hip_r",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Left_Chest",        &g_PcConfig.vrHolsterSlot[2],   "vr_holster_chest_l",    VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
