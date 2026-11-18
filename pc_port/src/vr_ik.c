@@ -1367,7 +1367,27 @@ static int LeftHeldItemMatrix(MATRIX* out)
     RotMul(rc, rz, rc);
     RotMul(c, rc, adj);
     RotMul(adj, ct, adj);
-    RotMul(adj, s_vhR[0], r);
+    {
+        /* The base the weapon sits on: the RIGHT hand's (its relaxed-hand K)
+         * mirrored across the controller's own x (S K S, S = diag(-1, 1, 1)),
+         * at the left virtual hand's size. The left hand's own K is not the
+         * right's mirror image, so a weapon tuned in the right hand sat wrong
+         * in the left; now it is that same placement, mirrored. */
+        float q[3][3], km[3][3], base[3][3];
+        const float sc = Ortho(s_vhR[0], q);
+        if (s_handKnown[1])
+        {
+            for (i = 0; i < 3; i++)
+                for (j = 0; j < 3; j++)
+                    km[i][j] = s_handK[1][i][j] * ((i == 0) != (j == 0) ? -1.0f : 1.0f) * sc;
+            RotMul(c, km, base);
+            RotMul(adj, base, r);
+        }
+        else
+        {
+            RotMul(adj, s_vhR[0], r);   /* right hand not read yet: the left's own */
+        }
+    }
 
     o[0] = -a[2] * cm;
     o[1] = -a[1] * cm;
