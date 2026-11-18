@@ -1248,6 +1248,38 @@ void VrTracking_PerfContext(char* buf, int n)
              VrCutsceneActive(), VrTracking_GetUiContext());
 }
 
+/* [VR-STATE] log: one line whenever the game state, the VR's reading of it
+ * (UI context, in-world screen), a 2D background, the frozen frame or the
+ * projection distance H changes - to find which state a scene runs in.
+ * Capped so a long session cannot flood the log. Called once per frame. */
+void VrTracking_StateLog(void)
+{
+    extern void VrOvr_Log(const char* fmt, ...);
+    extern s32  g_Pc2dBackgroundActive;
+    extern int  g_PsxPresentLastFrame;
+    extern long ReadGeomScreen();
+    static int  s_last[8] = { -1, -1, -1, -1, -1, -1, -1, -1 }, s_lines = 0;
+    int cur[8];
+    int i, changed = 0;
+
+    cur[0] = (int)g_GameWork.gameState;
+    cur[1] = (int)g_SysWork.sysState;
+    cur[2] = VrTracking_GetUiContext();
+    cur[3] = VrTracking_UiInWorld();
+    cur[4] = g_Pc2dBackgroundActive > 0;
+    cur[5] = g_PsxPresentLastFrame;
+    cur[6] = VrCutsceneActive();
+    cur[7] = (int)ReadGeomScreen();
+    for (i = 0; i < 8; i++)
+        if (cur[i] != s_last[i]) changed = 1;
+    if (!changed || s_lines >= 600)
+        return;
+    s_lines++;
+    memcpy(s_last, cur, sizeof(cur));
+    VrOvr_Log("[VR-STATE] game %d sys %d | ui %d inworld %d bg2d %d frozen %d cutscene %d | H %d | room %d\n",
+              cur[0], cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7], (int)g_SavegamePtr->mapRoomIdx);
+}
+
 /* Where Harry stood (world Q12) and faced (Q12 angle) when the last view
  * was built: the IK body runs before this frame's view exists and moves
  * that view along with him (vr_ik.c HeadFrameGet). */

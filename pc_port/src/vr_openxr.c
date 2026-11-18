@@ -746,6 +746,10 @@ static void BeginNextFrame(void)
 #if defined(__ANDROID__)
         GpuTimerBegin();
 #endif
+        {
+            extern void VrTracking_StateLog(void);
+            VrTracking_StateLog();
+        }
 
         /* frame rate vs the headset's every 5 s, split into the game's own
          * work (frame begin -> next wait) and time blocked in xrWaitFrame.

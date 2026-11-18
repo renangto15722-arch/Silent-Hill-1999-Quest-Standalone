@@ -217,7 +217,7 @@ s_PcConfig g_PcConfig = {
     .vrEyeRes            = 100.0f, /* eye images at the window's resolution */
     .vrWeaponSize        = 140.0f, /* weapons 40% bigger than the models they replace (tuned 17/11/2026) */
     /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
-    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f },
+    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 200.0f, -1.0f },   /* shotgun 200% (tuned 17/11/2026) */
     /* Default weapon placement in the hand (VR_Objects), tuned on the Quest 3
      * 17/11/2026. Per row: forward (Z), up (Y), right (X) cm, then pitch (X),
      * yaw (Y), roll (Z) deg; PcConfig_GripSlot order. A vr_grip_<id> line in
@@ -233,7 +233,7 @@ s_PcConfig g_PcConfig = {
         { -10.0f,   2.0f, -1.0f,   0.0f,  0.0f,   0.0f },   /* 135 axe           */
         {  -3.0f,   5.0f, -1.0f,  20.0f,  0.0f,   5.0f },   /* 160 handgun       */
         { -13.0f,   5.0f,  0.0f,  30.0f,  0.0f,   0.0f },   /* 161 hunting rifle */
-        { -11.0f,   3.0f, -2.0f,  30.0f,  0.0f,   0.0f },   /* 162 shotgun       */
+        { -23.0f,   4.0f, -2.0f,  40.0f,  0.0f,   0.0f },   /* 162 shotgun       */
         {   4.0f,   2.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 163 hyper blaster */
     },
     /* Gun aim, tuned on the Quest 3 17/11/2026: forward, up, right (cm), pitch,
@@ -243,7 +243,7 @@ s_PcConfig g_PcConfig = {
     .vrGunAim = {
         [8]  = {  5.0f,  -6.5f,  2.0f, -20.0f, 4.0f },   /* 160 handgun       */
         [9]  = { 13.0f,   0.0f, -1.0f, -21.0f, 4.0f },   /* 161 hunting rifle */
-        [10] = { 20.0f, -10.0f,  2.0f, -25.0f, 4.0f },   /* 162 shotgun       */
+        [10] = { 33.5f, -12.0f,  3.0f, -24.0f, 4.0f },   /* 162 shotgun       */
         [11] = { 19.0f,  -5.0f,  0.0f,  -6.0f, 3.0f },   /* 163 hyper blaster */
     },
     .vrGunSight          = 2,      /* laser beam + dot on every gun */
