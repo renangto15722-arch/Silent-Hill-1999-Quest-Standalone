@@ -416,6 +416,60 @@ int VrIk_TrackingDirToWorld(const float d[3], float out[3])
 }
 
 static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3]);
+static int LeftWeaponAdjust(float adj[3][3], float ow[3], float pivot[3]);
+
+/* A controller's AIM pose (tracking space). The runtime gives the right
+ * hand's; the left one's is the left GRIP pose times the right hand's
+ * aim-in-grip relation mirrored across the controller's x (S = diag(-1,1,1):
+ * rotation S Rel S, offset S d) - a gun in the left hand then points and
+ * shoots the way the same gun does in the right. The relation is learned
+ * whenever both right poses are there. */
+static int AimPoseOf(int hand, float pos[3], float rot[3][3])
+{
+    static float s_rel[3][3], s_relT[3];
+    static int   s_relOk;
+    float        gp[3], gr[3][3], ap[3], ar[3][3];
+    int          i, j, k;
+
+    if (VrOvr_GetHandPose(1, gp, gr) && VrOvr_GetAimPose(ap, ar))
+    {
+        for (i = 0; i < 3; i++)
+        {
+            for (j = 0; j < 3; j++)
+                s_rel[i][j] = gr[0][i] * ar[0][j] + gr[1][i] * ar[1][j] + gr[2][i] * ar[2][j];
+            s_relT[i] = gr[0][i] * (ap[0] - gp[0]) + gr[1][i] * (ap[1] - gp[1]) + gr[2][i] * (ap[2] - gp[2]);
+        }
+        s_relOk = 1;
+        if (hand == 1)
+        {
+            for (i = 0; i < 3; i++)
+            {
+                pos[i] = ap[i];
+                for (j = 0; j < 3; j++) rot[i][j] = ar[i][j];
+            }
+            return 1;
+        }
+    }
+    else if (hand == 1)
+        return VrOvr_GetAimPose(pos, rot);
+
+    if (!s_relOk || !VrOvr_GetHandPose(0, gp, gr))
+        return 0;
+    for (i = 0; i < 3; i++)
+    {
+        float t = 0.0f;
+        for (j = 0; j < 3; j++)
+        {
+            float v = 0.0f;
+            for (k = 0; k < 3; k++)
+                v += gr[i][k] * s_rel[k][j] * ((k == 0) != (j == 0) ? -1.0f : 1.0f);
+            rot[i][j] = v;
+            t += gr[i][j] * s_relT[j] * (j == 0 ? -1.0f : 1.0f);
+        }
+        pos[i] = gp[i] + t;
+    }
+    return 1;
+}
 
 /* Right controller pointing ray in the world: origin (world Q12) and unit
  * direction (Q12). The bullet ray of player_control.c in VR. */
@@ -424,8 +478,11 @@ int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
     HeadFrame f;
     float     ap[3], ar[3][3], w[3], d[3], dw[3];
 
+    const int hand = VrInteract_WeaponHand();   /* the gun's hand: 1 right, 0 left */
+    const float sx = hand ? 1.0f : -1.0f;      /* the left mirrors right and yaw */
+
     if (!VrTracking_HeadCamActive() || VrTracking_CutsceneActive() ||
-        !g_PcFpsCam || !HeadFrameGet(&f) || !VrOvr_GetAimPose(ap, ar))
+        !g_PcFpsCam || !HeadFrameGet(&f) || !AimPoseOf(hand, ap, ar))
         return 0;
 
     /* the VR Weapon Grip page's Gun Aim rows (vr_aim_*), in the aim pose's own
@@ -441,12 +498,12 @@ int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
             o[k] = g_PcConfig.vrAimOfs[k] + ((slot >= 0) ? g_PcConfig.vrGunAim[slot][k] : 0.0f);
         {
             const float  p   = o[3] * (3.14159265f / 180.0f), y = o[4] * (3.14159265f / 180.0f);
-            const float  kz  = cosf(p) * cosf(y), kx = cosf(p) * sinf(y), ky = sinf(p);
+            const float  kz  = cosf(p) * cosf(y), kx = sx * cosf(p) * sinf(y), ky = sinf(p);
             int          i;
             float        m[3];
             for (i = 0; i < 3; i++)
             {
-                m[i] = ap[i] + ar[i][0] * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
+                m[i] = ap[i] + ar[i][0] * sx * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
                 d[i] = -ar[i][2] * kz + ar[i][0] * kx + ar[i][1] * ky;
             }
             PointToWorld(&f, m, w);
@@ -456,11 +513,10 @@ int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
 
     /* the weapon's own VR_Objects turn/offset: the barrel moved with the
      * model, so the ray (shot + laser) does too - turned about the hand */
-    if (VrInteract_WeaponHand() != 0)
     {
         float adj[3][3], ow[3], pv[3], rel[3], v[3];
         int   i;
-        if (RightWeaponAdjust(adj, ow, pv))
+        if (hand ? RightWeaponAdjust(adj, ow, pv) : LeftWeaponAdjust(adj, ow, pv))
         {
             for (i = 0; i < 3; i++) rel[i] = w[i] - pv[i];
             RotVec(adj, rel, v);
@@ -1344,7 +1400,11 @@ static void HeldItemOut(int hand, const float r[3][3], const float ow[3], MATRIX
 
 /* The knife in the LEFT hand: on the left virtual hand, with the VR Weapon
  * Grip offset mirrored (right and yaw/roll flip sides). */
-static int LeftHeldItemMatrix(MATRIX* out)
+/* The left-hand weapon's grip turn and offset in the world - the right
+ * hand's VR_Objects placement mirrored (yaw, roll and the right offset
+ * negated): the weapon is the left virtual hand turned by adj about the hand
+ * (s_vhT[0]) and moved by ow. Shared by the model and the gun ray. */
+static int LeftWeaponAdjust(float adj[3][3], float ow[3], float pivot[3])
 {
     const int    item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
     const int    w    = PcConfig_GripSlot(item);
@@ -1353,12 +1413,11 @@ static int LeftHeldItemMatrix(MATRIX* out)
     static const float zero[6] = { 0 };
     static const float ax[3] = { 1.0f, 0.0f, 0.0f }, ay[3] = { 0.0f, 1.0f, 0.0f }, az[3] = { 0.0f, 0.0f, 1.0f };
     const float* a = (w >= 0) ? g_PcConfig.vrGrip[w] : zero;
-    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], adj[3][3], r[3][3], o[3], ow[3];
+    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], o[3];
     int    i, j;
 
     if (!s_ikActive || !s_vhOk[0] || !GripWorldRotation(0, c))
         return 0;
-
     for (i = 0; i < 3; i++)
         for (j = 0; j < 3; j++) ct[i][j] = c[j][i];
     AxisRotation(ay, -a[4] * d2r, ry);
@@ -1368,6 +1427,22 @@ static int LeftHeldItemMatrix(MATRIX* out)
     RotMul(rc, rz, rc);
     RotMul(c, rc, adj);
     RotMul(adj, ct, adj);
+    o[0] = -a[2] * cm;
+    o[1] = -a[1] * cm;
+    o[2] = a[0] * cm;
+    RotVec(c, o, ow);
+    if (pivot)
+        for (i = 0; i < 3; i++) pivot[i] = s_vhT[0][i];
+    return 1;
+}
+
+static int LeftHeldItemMatrix(MATRIX* out)
+{
+    float c[3][3], adj[3][3], r[3][3], ow[3];
+    int   i, j;
+
+    if (!LeftWeaponAdjust(adj, ow, NULL) || !GripWorldRotation(0, c))
+        return 0;
     {
         /* The base the weapon sits on: the RIGHT hand's (its relaxed-hand K)
          * mirrored across the controller's own x (S K S, S = diag(-1, 1, 1)),
@@ -1389,13 +1464,6 @@ static int LeftHeldItemMatrix(MATRIX* out)
             RotMul(adj, s_vhR[0], r);   /* right hand not read yet: the left's own */
         }
     }
-
-    o[0] = -a[2] * cm;
-    o[1] = -a[1] * cm;
-    o[2] = a[0] * cm;
-    RotVec(c, o, ow);
-
-    (void)i; (void)j;
     HeldItemOut(0, r, ow, out);
     return 1;
 }

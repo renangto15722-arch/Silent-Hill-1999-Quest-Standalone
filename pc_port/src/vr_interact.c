@@ -18,8 +18,9 @@
 
  Either grip, one owner per press, decided at the press (GripPress):
    H. HOLSTER - the hand is within VR_HOLSTER_RADIUS_M of one of the six
-               holsters (vr_ik.c) holding a weapon Harry owns - the left
-               hand only finds the knife (VR_LEFT_WEAPON): at the equipped
+               holsters (vr_ik.c) holding a weapon Harry owns - either
+               hand takes any weapon (a gun in the left hand aims and
+               fires from the left controller, vr_ik.c): at the equipped
                weapon's own holster the press holsters it or draws it into
                this hand (drawn in the other hand, this hand takes it); at
                another's it equips that weapon, in this hand. Holstered,
@@ -259,18 +260,21 @@ int Pc_VrPickupHeld(void)
 /* HOLSTER (see the header) */
 static int s_holstered;        /* the equipped weapon is in the holster */
 static u8  s_holsterWeapon;    /* ...this one (another equipped = drawn) */
-static int s_leftWeapon;       /* the equipped knife is in the LEFT hand */
-
-/* The only weapon the left hand takes. Every other one is drawn and fired
- * with the right hand. */
-#define VR_LEFT_WEAPON InvItemId_KitchenKnife
+static int s_leftWeapon;       /* the equipped weapon is in the LEFT hand */
+static u8  s_leftItem;         /* ...this one (another equipped = right hand) */
 
 /* The hand the equipped weapon is in: 0 = left, 1 = right (world_draw.c, vr_ik.c). */
 int VrInteract_WeaponHand(void)
 {
-    if (s_leftWeapon && g_SavegamePtr->equippedWeapon != VR_LEFT_WEAPON)
-        s_leftWeapon = 0;   /* another weapon was equipped: it is in the right hand */
+    if (s_leftWeapon && g_SavegamePtr->equippedWeapon != s_leftItem)
+        s_leftWeapon = 0;   /* another weapon was equipped (wheel, inventory): it is in the right hand */
     return s_leftWeapon ? 0 : 1;
+}
+
+static void SetWeaponHand(int handIdx, u8 id)
+{
+    s_leftWeapon = (handIdx == 0);
+    s_leftItem   = id;
 }
 
 static int HolsterWeapon(void)
@@ -323,7 +327,7 @@ static float HandInBox(const VECTOR3* hand, const VECTOR3* centre)
 }
 
 /* The weapon in the holster box a hand is in, 0 for none; outDist = how far
- * in (HandInBox). The left hand only finds VR_LEFT_WEAPON. Logged per grip
+ * in (HandInBox). Logged per grip
  * press, so a miss in the headset log says how far off the hand was. */
 static u8 HandAtHolster(int handIdx, float* outDist)
 {
@@ -339,7 +343,7 @@ static u8 HandAtHolster(int handIdx, float* outDist)
     {
         const int id = VrIk_HolsterSlotItem(k);
         float     d;
-        if (!id || (handIdx == 0 && id != VR_LEFT_WEAPON) || !VrIk_HolsterSlotWorld(k, &hol))
+        if (!id || !VrIk_HolsterSlotWorld(k, &hol))
             continue;
         d = HandInBox(&hand, &hol);
         if (d < best) { best = d; bestId = (u8)id; }
@@ -364,9 +368,6 @@ int VrInteract_HandInSlotBox(int slot)
         return 0;
     for (h = 0; h < 2; h++)
     {
-        const int id = VrIk_HolsterSlotItem(slot);
-        if (h == 0 && id != VR_LEFT_WEAPON && slot != VrIk_MapHolsterSlot())
-            continue;
         if (VrIk_GetHandWorld(h, &hand) && HandInBox(&hand, &hol) <= 1.0f)
             return 1;
     }
@@ -483,14 +484,14 @@ static int GripPress(int handIdx)
             if (!s_holstered && VrInteract_WeaponHand() != handIdx)
             {
                 /* drawn, in the other hand: this hand takes it */
-                s_leftWeapon = (handIdx == 0);
+                SetWeaponHand(handIdx, at);
                 if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d to the %s hand\n", (int)at, side);
                 return GRIP_SPENT;
             }
             s_holstered     = !s_holstered;
             s_holsterWeapon = at;
-            s_leftWeapon    = (handIdx == 0);
+            SetWeaponHand(handIdx, at);
             if (!s_holstered && s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
             VrOvr_Log("[VR-HANDS] holster: weapon %d %s (%s hand)\n", (int)at,
                       s_holstered ? "holstered" : "drawn", side);
@@ -502,7 +503,7 @@ static int GripPress(int handIdx)
             if (Pc_VrWheelUse(at))
             {
                 s_holstered  = 0;
-                s_leftWeapon = (handIdx == 0);
+                SetWeaponHand(handIdx, at);
                 if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d drawn (equipped, %s hand)\n", (int)at, side);
             }
