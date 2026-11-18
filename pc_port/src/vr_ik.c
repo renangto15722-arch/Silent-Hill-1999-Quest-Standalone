@@ -764,19 +764,73 @@ int VrIk_RootExactOwned(void)
     return s_ikActive;
 }
 
-/* HOLSTERS (see the header): each slot, in meters, in the body frame (x
- * right, y up, z forward), at Harry's own size, and the pitch that turns the
- * relaxed hand: +90 hangs it down, -90 stands it up. vrHolsterSlot order. */
+/* HOLSTERS (see the header): each slot on the PLAYER's real body, as
+ * fractions of the standing height H: up from the floor, right of and ahead
+ * of the eyes (the headset), in the body's frame - and the pitch that turns
+ * the relaxed hand: +90 hangs it down, -90 stands it up. vrHolsterSlot order.
+ * Standard body proportions: eye 0.936 H, shoulder 0.82 H, chest 0.72 H,
+ * hip 0.53 H; the eyes ~0.055 H ahead of the spine. At H = 1.66 m (Harry)
+ * they land where the old fixed slots were. */
 static const struct { float right, up, fwd, pitch; } s_holsterSlots[6] = {
-    { -0.20f, 0.90f,  0.04f,  90.0f },   /* left hip */
-    {  0.20f, 0.90f,  0.04f,  90.0f },   /* right hip */
-    { -0.12f, 1.28f,  0.12f,  90.0f },   /* left chest */
-    {  0.12f, 1.28f,  0.12f,  90.0f },   /* right chest */
-    { -0.15f, 1.45f, -0.15f, -90.0f },   /* behind the left shoulder */
-    {  0.15f, 1.45f, -0.15f, -90.0f },   /* behind the right shoulder */
+    { -0.120f, 0.550f, -0.030f,  90.0f },   /* left hip */
+    {  0.120f, 0.550f, -0.030f,  90.0f },   /* right hip */
+    { -0.070f, 0.750f,  0.017f,  90.0f },   /* left chest */
+    {  0.070f, 0.750f,  0.017f,  90.0f },   /* right chest */
+    { -0.090f, 0.860f, -0.145f, -90.0f },   /* behind the left shoulder */
+    {  0.090f, 0.860f, -0.145f, -90.0f },   /* behind the right shoulder */
 };
 
 static int s_ikActive;   /* VrIk_ApplyArms posed the body this frame */
+
+/* The player's standing height, meters: the
+ * highest the headset has been above the floor (the tracking space is the
+ * floor-level STAGE) over the eye-to-height ratio. Logged when it changes. */
+static float PlayerHeightM(const HeadFrame* f)
+{
+    static float s_eyeMax = 0.0f, s_logged = 0.0f;
+    float        h;
+
+    /* measured, never vr_player_height: that key sizes Harry's skeleton, has
+     * no menu row any more, and a stale 190 there put every holster where a
+     * 1.90 m body would have it */
+    if (f->hp[1] > s_eyeMax && f->hp[1] < 2.10f)
+        s_eyeMax = f->hp[1];
+    h = (s_eyeMax > 0.9f ? s_eyeMax : 1.55f) / VR_EYE_TO_HEIGHT;
+    if (h < 1.20f) h = 1.20f;
+    if (h > 2.20f) h = 2.20f;
+    if (fabsf(h - s_logged) > 0.02f)
+    {
+        s_logged = h;
+        VrOvr_Log("[VR-IK] holsters for a player %.2f m tall (headset up to %.2f m above the floor)\n",
+                  (double)h, (double)s_eyeMax);
+    }
+    return h;
+}
+
+/* A slot's spot in the world (Q8, exact): straight below the headset at the
+ * slot's height above the real floor, then out along the body's right and
+ * forward - real meters at the hands' scale (ReachScale), so the hand and
+ * the holster agree wherever Harry's own skeleton is. 0 = no head pose. */
+static int SlotWorldT(int slot, double t[3])
+{
+    HeadFrame f;
+    float     body[3][3], below[3], w[3], H;
+    const float rs = ReachScale();
+    int       i;
+
+    if (!HeadFrameGet(&f))
+        return 0;
+    H = PlayerHeightM(&f);
+    below[0] = f.hp[0];
+    below[1] = s_holsterSlots[slot].up * H;   /* tracking space: y up, floor at 0 */
+    below[2] = f.hp[2];
+    PointToWorld(&f, below, w);
+    BodyRotation(body);
+    for (i = 0; i < 3; i++)
+        t[i] = (double)w[i] + (double)(body[i][0] * s_holsterSlots[slot].right * H +
+                                       body[i][2] * s_holsterSlots[slot].fwd * H) * rs;
+    return 1;
+}
 
 /* Harry owns this weapon (pc_combat.c, the inventory). */
 static int OwnsWeapon(int itemId)
@@ -816,56 +870,6 @@ int VrIk_HolsterSlotOf(int itemId)
     return -1;
 }
 
-/* A slot's world matrix (rotation Q12, translation world Q8). 0 while the IK
- * body is not running or the relaxed hand is not read yet. */
-int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
-{
-    const GsCOORDINATE2* root = &g_SysWork.playerBoneCoords[HarryBone_Root];
-    float body[3][3], local[3], ofs[3], px[3][3], r[3][3];
-    const float u = VR_IK_UNITS_PER_M;
-    float a;
-    int   i, j;
-
-    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1])
-        return 0;
-    a = s_holsterSlots[slot].pitch * (3.14159265f / 180.0f);
-    BodyRotation(body);
-
-    /* PSX axes: y is down */
-    local[0] = s_holsterSlots[slot].right * u * s_bodyScaleApplied;
-    local[1] = -s_holsterSlots[slot].up * u * s_bodyScaleApplied;
-    local[2] = s_holsterSlots[slot].fwd * u * s_bodyScaleApplied;
-    RotVec(body, local, ofs);
-
-    /* about the body's right axis, then into the world */
-    px[0][0] = 1.0f; px[0][1] = 0.0f;     px[0][2] = 0.0f;
-    px[1][0] = 0.0f; px[1][1] = cosf(a);  px[1][2] = -sinf(a);
-    px[2][0] = 0.0f; px[2][1] = sinf(a);  px[2][2] = cosf(a);
-    RotMul(px, s_handK[1], r);
-    RotMul(body, r, r);
-
-    for (i = 0; i < 3; i++)
-    {
-        for (j = 0; j < 3; j++)
-            out->m[i][j] = (s16)lrintf(r[i][j] * HandScale() * s_bodyScaleApplied * 4096.0f);
-        out->t[i] = root->coord.t[i] + (s32)lrintf(ofs[i]);
-    }
-    {
-        /* its float source for PGXP (vw_calc.c Vw_PcExactLocalSet): the slot
-         * rides the body without whole-unit steps */
-        extern void Vw_PcExactLocalSet(const MATRIX* rounded, const double m[9], const double t[3]);
-        double em[9], et[3];
-        for (i = 0; i < 3; i++)
-        {
-            for (j = 0; j < 3; j++)
-                em[i * 3 + j] = (double)r[i][j] * HandScale() * s_bodyScaleApplied;
-            et[i] = s_rootExactT[i] + ofs[i];   /* the root's exact spot (RootExactRegister) */
-        }
-        Vw_PcExactLocalSet(out, em, et);
-    }
-    return 1;
-}
-
 /* GRAB BOXES (vr_holster_box.c, world_draw.c, vr_interact.c). The body's
  * frame (columns right, down, forward), the size the hands and what they hold
  * are drawn at (1 / World_Scale), and a holster slot's pose without any scale:
@@ -895,20 +899,45 @@ static void SlotItemRotation(const float frame[3][3], float pitchDeg, float out[
 
 int VrIk_HolsterSlotPose(int slot, float rot[3][3], double t[3])
 {
-    float body[3][3], local[3], ofs[3];
-    const float u = VR_IK_UNITS_PER_M;
-    int   i;
+    float body[3][3];
 
-    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1])
+    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, t))
         return 0;
     BodyRotation(body);
-    local[0] = s_holsterSlots[slot].right * u * s_bodyScaleApplied;
-    local[1] = -s_holsterSlots[slot].up * u * s_bodyScaleApplied;
-    local[2] = s_holsterSlots[slot].fwd * u * s_bodyScaleApplied;
-    RotVec(body, local, ofs);
     SlotItemRotation(body, s_holsterSlots[slot].pitch, rot);
+    return 1;
+}
+
+/* A slot's world matrix (rotation Q12, translation world Q8). 0 while the IK
+ * body is not running, the relaxed hand is not read yet or there is no head
+ * pose. The slot sits on the player's real body (SlotWorldT). */
+int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
+{
+    float  body[3][3], r[3][3];
+    double et[3];
+    int    i, j;
+
+    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, et))
+        return 0;
+    BodyRotation(body);
+    SlotItemRotation(body, s_holsterSlots[slot].pitch, r);
+
     for (i = 0; i < 3; i++)
-        t[i] = s_rootExactT[i] + ofs[i];
+    {
+        for (j = 0; j < 3; j++)
+            out->m[i][j] = (s16)lrintf(r[i][j] * HandScale() * 4096.0f);
+        out->t[i] = (s32)lrint(et[i]);
+    }
+    {
+        /* its float source for PGXP (vw_calc.c Vw_PcExactLocalSet): the slot
+         * rides the body without whole-unit steps */
+        extern void Vw_PcExactLocalSet(const MATRIX* rounded, const double m[9], const double t[3]);
+        double em[9];
+        for (i = 0; i < 3; i++)
+            for (j = 0; j < 3; j++)
+                em[i * 3 + j] = (double)r[i][j] * HandScale();
+        Vw_PcExactLocalSet(out, em, et);
+    }
     return 1;
 }
 
