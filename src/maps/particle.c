@@ -73,7 +73,29 @@ static void Pc_BgEtcSpriteBandUvFix(POLY_FT4* poly)
  * Re-emit the primitive as the whole box, one texel per PSX pixel. Every texel
  * the triangle left out is transparent, so this is the PSX pixel coverage at
  * any resolution. */
+static POLY_FT4* Pc_SpriteTriToQuadScaled(POLY_FT3* tri, float scale);
 static POLY_FT4* Pc_SpriteTriToQuad(POLY_FT3* tri)
+{
+    return Pc_SpriteTriToQuadScaled(tri, 1.0f);
+}
+
+/* Snow flake size. A flake is 1..4 PSX pixels whatever its distance, which is
+ * sized for the game's projection H = 224 (71 deg). A wider projection (Full
+ * VR uses H ~70: one PSX pixel is ~3x the angle) blows the flakes up by the
+ * same factor, so they are drawn H / 224 of a pixel per pixel there, times
+ * Snow_Size (snow_size %, 100 = the original look). Only the precise (PGXP)
+ * corners shrink; without PGXP a flake stays at least one whole pixel. */
+static float Pc_SnowFlakeScale(void)
+{
+    s32   geomH = 224;
+    float s;
+    gte_ReadGeomScreen(&geomH);
+    s = (geomH > 0 ? (float)geomH : 224.0f) / 224.0f;
+    if (s > 1.0f) s = 1.0f;
+    return s * (g_PcConfig.snowSize / 100.0f);
+}
+
+static POLY_FT4* Pc_SpriteTriToQuadScaled(POLY_FT3* tri, float scale)
 {
     POLY_FT4* quad  = (POLY_FT4*)tri;
     s16       x     = tri->x0;
@@ -120,10 +142,15 @@ static POLY_FT4* Pc_SpriteTriToQuad(POLY_FT3* tri)
     quad->u3 = u + w;
     quad->v3 = v + h;
 
-    PsyX_PreciseEmit(&quad->x0, pt, 0.0f, 0.0f);
-    PsyX_PreciseEmit(&quad->x1, pt, (float)w, 0.0f);
-    PsyX_PreciseEmit(&quad->x2, pt, 0.0f, (float)h);
-    PsyX_PreciseEmit(&quad->x3, pt, (float)w, (float)h);
+    /* scaled about the box centre, so a smaller flake stays where it was */
+    {
+        const float fw = (float)w, fh = (float)h;
+        const float x0 = 0.5f * fw * (1.0f - scale), y0 = 0.5f * fh * (1.0f - scale);
+        PsyX_PreciseEmit(&quad->x0, pt, x0,              y0);
+        PsyX_PreciseEmit(&quad->x1, pt, x0 + fw * scale, y0);
+        PsyX_PreciseEmit(&quad->x2, pt, x0,              y0 + fh * scale);
+        PsyX_PreciseEmit(&quad->x3, pt, x0 + fw * scale, y0 + fh * scale);
+    }
 
     return quad;
 }
@@ -2942,7 +2969,7 @@ void Particle_SnowDraw(s_Particle* part)
             }
 
 #ifdef SH_PC_PORT
-            Pc_SpriteTriToQuad(polyFt3);
+            Pc_SpriteTriToQuadScaled(polyFt3, Pc_SnowFlakeScale());
 #endif
 
 #if defined(MAP1_S00) || defined(MAP6_S00)

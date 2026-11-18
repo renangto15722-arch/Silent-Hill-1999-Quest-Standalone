@@ -328,9 +328,41 @@ static int Loose_ResolveCase(const char* path, char* out, size_t outSize)
 /* fopen a loose file, retrying case-insensitively on a miss (Linux). On
  * Windows/macOS the first fopen already matches any case, so the fallback is
  * compiled out / never taken. */
+/* HD_Maps / HD_Menus options: a loose IMAGE (.png / .dds) under gamedata/load/
+ * is skipped when its group is switched off, so the disc original is used.
+ * Paper maps = TIM/MP_* and TIM/MR_*; every other image counts as menus. Other
+ * loose files (models, sounds, text) are not affected. */
+static int Loose_ImageAllowed(const char* path)
+{
+    static const char prefix[] = "gamedata/load/";
+    const char*       rel;
+    const char*       ext;
+    size_t            n;
+
+    if (strncmp(path, prefix, sizeof(prefix) - 1) != 0) return 1;
+    rel = path + sizeof(prefix) - 1;
+    n   = strlen(rel);
+    if (n < 4) return 1;
+    ext = rel + n - 4;
+#ifdef _WIN32
+#define LOOSE_STRICMP  _stricmp
+#define LOOSE_STRNICMP _strnicmp
+#else
+#define LOOSE_STRICMP  strcasecmp
+#define LOOSE_STRNICMP strncasecmp
+#endif
+    if (LOOSE_STRICMP(ext, ".png") != 0 && LOOSE_STRICMP(ext, ".dds") != 0) return 1;
+
+    if (LOOSE_STRNICMP(rel, "TIM/MP_", 7) == 0 || LOOSE_STRNICMP(rel, "TIM/MR_", 7) == 0)
+        return g_PcConfig.hdMaps;
+    return g_PcConfig.hdMenus;
+}
+
 static FILE* Loose_FOpen(const char* path, const char* mode)
 {
-    FILE* f = fopen(path, mode);
+    FILE* f;
+    if (!Loose_ImageAllowed(path)) return NULL;
+    f = fopen(path, mode);
 #ifndef _WIN32
     if (f == NULL)
     {

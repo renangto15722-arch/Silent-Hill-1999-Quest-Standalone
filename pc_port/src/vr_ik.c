@@ -415,6 +415,8 @@ int VrIk_TrackingDirToWorld(const float d[3], float out[3])
     return 1;
 }
 
+static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3]);
+
 /* Right controller pointing ray in the world: origin (world Q12) and unit
  * direction (Q12). The bullet ray of player_control.c in VR. */
 int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
@@ -430,20 +432,43 @@ int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
      * frame (x right, y up, z back): the muzzle point, then the ray turned by
      * pitch (up +) and yaw (right +) off the pointing axis (-Z) */
     {
-        const float* o   = g_PcConfig.vrAimOfs;
+        /* + the equipped gun's own aim (VR_Objects Aim rows, vrGunAim) */
+        const int    slot = PcConfig_GripSlot((int)g_SavegamePtr->equippedWeapon & 0xFF);
+        float        o[5];
         const float  cm  = 0.01f;
-        const float  p   = o[3] * (3.14159265f / 180.0f), y = o[4] * (3.14159265f / 180.0f);
-        const float  kz  = cosf(p) * cosf(y), kx = cosf(p) * sinf(y), ky = sinf(p);
-        int          i;
-        float        m[3];
-        for (i = 0; i < 3; i++)
+        int          k;
+        for (k = 0; k < 5; k++)
+            o[k] = g_PcConfig.vrAimOfs[k] + ((slot >= 0) ? g_PcConfig.vrGunAim[slot][k] : 0.0f);
         {
-            m[i] = ap[i] + ar[i][0] * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
-            d[i] = -ar[i][2] * kz + ar[i][0] * kx + ar[i][1] * ky;
+            const float  p   = o[3] * (3.14159265f / 180.0f), y = o[4] * (3.14159265f / 180.0f);
+            const float  kz  = cosf(p) * cosf(y), kx = cosf(p) * sinf(y), ky = sinf(p);
+            int          i;
+            float        m[3];
+            for (i = 0; i < 3; i++)
+            {
+                m[i] = ap[i] + ar[i][0] * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
+                d[i] = -ar[i][2] * kz + ar[i][0] * kx + ar[i][1] * ky;
+            }
+            PointToWorld(&f, m, w);
         }
-        PointToWorld(&f, m, w);
     }
     DirToWorld(&f, d, dw);
+
+    /* the weapon's own VR_Objects turn/offset: the barrel moved with the
+     * model, so the ray (shot + laser) does too - turned about the hand */
+    if (VrInteract_WeaponHand() != 0)
+    {
+        float adj[3][3], ow[3], pv[3], rel[3], v[3];
+        int   i;
+        if (RightWeaponAdjust(adj, ow, pv))
+        {
+            for (i = 0; i < 3; i++) rel[i] = w[i] - pv[i];
+            RotVec(adj, rel, v);
+            for (i = 0; i < 3; i++) w[i] = pv[i] + v[i] + ow[i];
+            RotVec(adj, dw, v);
+            for (i = 0; i < 3; i++) dw[i] = v[i];
+        }
+    }
     if (!Normalize(dw)) return 0;
 
     pos->vx = (s32)lrintf(w[0] * 16.0f);
@@ -1195,7 +1220,12 @@ static int LeftHeldItemMatrix(MATRIX* out)
 /* The equipped weapon's model matrix in the hand, with its grip offset
  * (world_draw.c WorldGfx_HeldItemDraw). 0 = no VR hands this frame: the game
  * draws it on Harry's hand bone (cutscenes, flat play). */
-int VrIk_HeldItemMatrix(MATRIX* out)
+/* The right-hand weapon's grip turn and offset in the world (VR_Objects
+ * position/rotation of the equipped weapon): the weapon is the virtual hand
+ * turned by adj about the hand (s_vhT[1]) and moved by ow. Shared by the
+ * model (VrIk_HeldItemMatrix) and the gun ray (VrIk_GetGunRay), so the shot
+ * and the laser leave the barrel wherever the weapon was placed. */
+static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3])
 {
     const int    item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
     const int    w    = PcConfig_GripSlot(item);
@@ -1204,11 +1234,9 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     const float  d2r  = 3.14159265f / 180.0f;
     const float  cm   = ReachScale() / 100.0f;
     static const float ax[3] = { 1.0f, 0.0f, 0.0f }, ay[3] = { 0.0f, 1.0f, 0.0f }, az[3] = { 0.0f, 0.0f, 1.0f };
-    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], adj[3][3], r[3][3], o[3], ow[3];
+    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], o[3];
     int    i, j;
 
-    if (VrInteract_WeaponHand() == 0)
-        return LeftHeldItemMatrix(out);
     if (!s_ikActive || !s_vhOk[1])
         return 0;
     a = (w >= 0) ? g_PcConfig.vrGrip[w] : zero;
@@ -1230,7 +1258,6 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     RotMul(rc, rz, rc);
     RotMul(c, rc, adj);
     RotMul(adj, ct, adj);             /* C R C^T: the turn in the world */
-    RotMul(adj, s_vhR[1], r);
 
     /* the controller frame as CtrlRotToWorld builds it: x right, y down,
      * z forward (PSX axes) */
@@ -1238,7 +1265,20 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     o[1] = -a[1] * cm;
     o[2] = a[0] * cm;
     RotVec(c, o, ow);
+    if (pivot)
+        for (i = 0; i < 3; i++) pivot[i] = s_vhT[1][i];
+    return 1;
+}
 
+int VrIk_HeldItemMatrix(MATRIX* out)
+{
+    float adj[3][3], r[3][3], ow[3];
+
+    if (VrInteract_WeaponHand() == 0)
+        return LeftHeldItemMatrix(out);
+    if (!RightWeaponAdjust(adj, ow, NULL))
+        return 0;
+    RotMul(adj, s_vhR[1], r);
     HeldItemOut(1, r, ow, out);
     return 1;
 }

@@ -1600,10 +1600,11 @@ int Pc_LangMenuRowActive(void)
     if (!g_PcConfig.crossRegionLanguages && g_GameRegion != Region_EUR)
         return 0; /* retail behaviour: this row is Auto Load off a PAL disc */
 
-    /* In-game too off a PAL disc (see SlotsOfferPacks). Auto Load, which the
-     * row replaces, is read once at the Konami logo and does nothing here. */
-    return SlotsCount() > 1 &&
-           (g_GameWork.gameStatePrev == GameState_MainMenu || g_GameRegion != Region_EUR);
+    /* Title screen only, on every disc. In-game the row is Auto Load again:
+     * it was replaced everywhere off a non-PAL disc, which left no way to turn
+     * Auto Load off - the game then skipped the save list and loaded the last
+     * save at every start. The value goes into the save when you save. */
+    return SlotsCount() > 1 && g_GameWork.gameStatePrev == GameState_MainMenu;
 }
 
 const char* Pc_LangItemName(int itemIdx)

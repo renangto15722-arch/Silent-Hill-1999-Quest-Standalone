@@ -261,6 +261,12 @@ static const s_PcOpt PCOPT_G[] = {
     /* New-Game start map. Moved here from the Camera page, which had run to 12
      * rows (the practical maximum) while this page had room to spare. */
     { "Map",           NULL,                           "map",                  NULL,      0, NULL,      NULL,                          1, PCK_MAP    },
+    /* HD content, read when it loads (restart to be sure): HD_Textures = the
+     * texture pack .zip in gamedata/texturemods (tex_pack.c), HD_Maps / HD_Menus
+     * = the loose images in gamedata/load (fsqueue_3.c Loose_ImageAllowed). */
+    { "HD_Textures",    &g_PcConfig.texturePacks,       "texture_packs",        VAL_ONOFF, 2, LBL_ONOFF, NULL,                          0, PCK_INT    },
+    { "HD_Maps",        &g_PcConfig.hdMaps,             "hd_maps",              VAL_ONOFF, 2, LBL_ONOFF, NULL,                          0, PCK_INT    },
+    { "HD_Menus",       &g_PcConfig.hdMenus,            "hd_menus",             VAL_ONOFF, 2, LBL_ONOFF, NULL,                          0, PCK_INT    },
     { "Next_Page",      NULL,                           NULL,                   NULL,      0, NULL,      NULL,                          0, PCK_NEXT   },
     { "Back",           NULL,                           NULL,                   NULL,      0, NULL,      NULL,                          0, PCK_BACK   },
 };
@@ -289,6 +295,8 @@ static const s_PcOpt PCOPT_S[] = {
      * Crosshair rows moved to the HUD page to make room, which is where the
      * quick-options overlay already groups them. */
     { "Weather_Rate",     &g_PcConfig.weatherSimHz,   "weather_sim_hz",   VAL_WHZ,   2, LBL_WHZ,   NULL, 1, PCK_INT  },
+    /* Snow flake size, % of the original look (particle.c Pc_SnowFlakeScale), live */
+    { "Snow_Size",        NULL, "snow_size",            NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.snowSize,            NULL,                       10.0f, 200.0f, 10.0f },
     { "Prev_Page",        NULL,                       NULL,               NULL,      0, NULL,      NULL, 0, PCK_PREV },
     { "Next_Page",        NULL,                       NULL,               NULL,      0, NULL,      NULL, 0, PCK_NEXT },
     { "Back",             NULL,                       NULL,               NULL,      0, NULL,      NULL, 0, PCK_BACK },
@@ -446,7 +454,7 @@ static const struct { int item; const char* name; } VROBJ_WEAPONS[] = {
     { 161, "Hunting_Rifle" }, { 162, "Shotgun" },      { 163, "Hyper_Blaster" },
 };
 #define VROBJ_WEAPON_COUNT ((int)(sizeof(VROBJ_WEAPONS) / sizeof(VROBJ_WEAPONS[0])))
-#define VROBJ_MAX_ROWS     (2 + VROBJ_WEAPON_COUNT * 8 + 8 + 3)
+#define VROBJ_MAX_ROWS     (2 + VROBJ_WEAPON_COUNT * 8 + 4 * 5 + 8 + 3)   /* + 5 aim rows on each of the 4 guns */
 
 static int     s_vrObjCatOpen[2] = { 1, 0 };            /* Weapons, Map */
 static int     s_vrObjWeaponOpen[VROBJ_WEAPON_COUNT];
@@ -463,6 +471,15 @@ static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_WEA
     { "______Rotation_Y_deg", 4, -180.0f, 180.0f, 5.0f },
     { "______Rotation_Z_deg", 5, -180.0f, 180.0f, 5.0f },
     { "______Scale",         -1, 50.0f,  200.0f, 5.0f },
+};
+/* a gun's own aim (vrGunAim, added to vr_aim_*): where the shot, laser and
+ * dot leave from and which way they go, per gun (vr_ik.c VrIk_GetGunRay) */
+static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_AIM_ROWS[5] = {
+    { "______Aim_X_cm",  2, -20.0f, 20.0f, 0.5f },   /* vrGunAim[]: fwd up right pitch yaw */
+    { "______Aim_Y_cm",  1, -20.0f, 20.0f, 0.5f },
+    { "______Aim_Z_cm",  0, -20.0f, 20.0f, 0.5f },
+    { "______Aim_Pitch_deg", 3, -45.0f, 45.0f, 1.0f },
+    { "______Aim_Yaw_deg", 4, -45.0f, 45.0f, 1.0f },
 };
 static const struct { const char* name; const char* key; int idx; float lo, hi, step; } VROBJ_MAP_ROWS[7] = {
     { "___Position_X_cm",  "vr_map_right", 2, -30.0f,  30.0f, 0.5f },
@@ -513,6 +530,21 @@ static int PcOpt_VrObjectsBuild(void)
                 r->fmin  = VROBJ_WEAPON_ROWS[k].lo;
                 r->fmax  = VROBJ_WEAPON_ROWS[k].hi;
                 r->fstep = VROBJ_WEAPON_ROWS[k].step;
+            }
+            if (item >= 160 && item <= 163)   /* guns: their own aim */
+            {
+                for (k = 0; k < 5; k++)
+                {
+                    s_PcOpt* r = &s_vrObjRows[n++];
+                    r->name     = VROBJ_AIM_ROWS[k].name;
+                    r->key      = s_vrObjGripKeys[w];   /* same vr_grip_<id> line */
+                    r->realtime = 1;
+                    r->kind     = PCK_SLIDER;
+                    r->ffield   = &g_PcConfig.vrGunAim[slot][VROBJ_AIM_ROWS[k].idx];
+                    r->fmin  = VROBJ_AIM_ROWS[k].lo;
+                    r->fmax  = VROBJ_AIM_ROWS[k].hi;
+                    r->fstep = VROBJ_AIM_ROWS[k].step;
+                }
             }
         }
     }
