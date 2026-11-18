@@ -9,4 +9,6 @@ void PsyX_GlReal_Scissor(GLint x, GLint y, GLsizei w, GLsizei h)  { glScissor(x,
 void PsyX_GlReal_Enable(GLenum cap)                               { glEnable(cap); }
 void PsyX_GlReal_Disable(GLenum cap)                              { glDisable(cap); }
 void PsyX_GlReal_BindFramebuffer(GLenum target, GLuint fb)        { glBindFramebuffer(target, fb); }
+void PsyX_GlReal_DrawArrays(GLenum mode, GLint first, GLsizei count) { glDrawArrays(mode, first, count); }
+void PsyX_GlReal_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei n) { glDrawArraysInstanced(mode, first, count, n); }
 #endif

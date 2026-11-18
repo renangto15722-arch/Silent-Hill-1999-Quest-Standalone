@@ -7,7 +7,7 @@
 
 ![Status](https://img.shields.io/badge/status-work%20in%20progress-orange)
 ![Platform](https://img.shields.io/badge/platform-Meta%20Quest%203-1c1e21)
-![Version](https://img.shields.io/badge/version-0.1-blue)
+![Version](https://img.shields.io/badge/version-0.2-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
 </div>
@@ -23,16 +23,20 @@
 |---|---|
 | 🥽 **Standalone** | Runs natively on the Quest 3, no PC or streaming |
 | 🎮 **6DoF motion controls** | Head and both hands tracked, roomscale |
-| 🔫 **Holsters** | Hips, chest and shoulders: grip to draw or put away a weapon |
+| 🔫 **Holsters** | Hips, chest and shoulders: grip to draw or put away a weapon. Each holster shows a see-through grab box, sized to your body |
+| 🎯 **Weapon wheel** | Optional instead of the holsters: hold the right grip, reach for a weapon, release |
+| ✋ **Both hands** | Any weapon in either hand; guns aim and fire from the hand that holds them |
+| 🔴 **Laser sight** | The shot goes where the laser points |
+| ⚡ **~72 fps** | Optimized for the Quest 3, with sharper eye images |
 | 🧱 **Improved PGXP** | Steadier geometry and textures, less PS1 wobble |
 
 ## 📦 What is included
 
 | File | |
 |---|---|
-| [`SilentHillVR-Quest-0.1.apk`](SilentHillVR-Quest-0.1.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
+| [`SilentHillVR-Quest-0.2.apk`](SilentHillVR-Quest-0.2.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
 | [`Install-SilentHillVR.bat`](Install-SilentHillVR.bat) | Installs it from a Windows PC over USB. |
-| [`SilentHillVR-Quest-0.1-source/`](SilentHillVR-Quest-0.1-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.1-source/quest/README.md) |
+| [`SilentHillVR-Quest-0.2-source/`](SilentHillVR-Quest-0.2-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.2-source/quest/README.md) |
 
 ## 💿 What you need
 
@@ -67,7 +71,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 <details>
 <summary><b>🛠️ Manual installation</b></summary>
 
-1. Install `SilentHillVR-Quest-0.1.apk` with SideQuest (or `adb install`).
+1. Install `SilentHillVR-Quest-0.2.apk` with SideQuest (or `adb install`).
 2. Start the game on the Quest (**Library → Unknown Sources**).
    The first time, a panel asks for **"All files access"**: turn it on and start the game again.
    The game then creates `/sdcard/SilentHillVR` with everything it needs.

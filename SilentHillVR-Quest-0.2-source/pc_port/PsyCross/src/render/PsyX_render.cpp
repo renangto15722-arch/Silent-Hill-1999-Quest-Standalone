@@ -2112,6 +2112,9 @@ typedef struct
 	GLint shadowClipLoc;
 	GLint shadowFadeDistLoc;
 	GLint stereoDLoc;
+	GLint eyeOnLoc;   /* Quest eye instancing (EYE_INST shaders only) */
+	GLint eyeClipLoc; /* Quest eye crop (EYE_INST shaders only) */
+	GLint eyeXfLoc;
 	GLint stereoCLoc;
 	GLint stereoUiLoc;
 	GLint stereoWorldLoc;
@@ -2165,6 +2168,9 @@ GLint u_shadowStrengthLoc;
 GLint u_shadowClipLoc;
 GLint u_shadowFadeDistLoc;
 GLint u_stereoDLoc = -1;
+GLint u_eyeOnLoc = -1;
+GLint u_eyeClipLoc = -1;
+GLint u_eyeXfLoc = -1;
 GLint u_stereoCLoc = -1;
 GLint u_stereoUiLoc = -1;
 GLint u_stereoWorldLoc = -1;
@@ -2498,7 +2504,7 @@ int g_PsxFogToBlack = 0;
 		"			vec3 rv = vec3((" XY " - u_reprojHC.yz) * (" W0 " / u_reprojHC.x), " W0 ");\n"\
 		"			rv = u_reprojR * rv + u_reprojT;\n"\
 		"			vec2 hp = u_reprojHC.yz * rv.z + u_reprojHC.x * rv.xy;\n"\
-		"			hp.x += u_stereoD + u_stereoC * rv.z;\n"\
+		"			hp.x += sD + sC * rv.z;\n"\
 		"			gl_Position = Projection * vec4(hp, a_zw.x * rv.z, rv.z);\n"
 
 #define GTE_PERSPECTIVE_CORRECTION \
@@ -2506,7 +2512,7 @@ int g_PsxFogToBlack = 0;
 		GTE_REPROJECT("a_pgxp.z", "a_pgxp.xy")\
 		"	} else if (u_pgxpEnabled > 0 && a_pgxp.z > 0.0) {\n"\
 		"		vec2 sp = a_pgxp.xy;\n"\
-		"		sp.x += u_stereoD / a_pgxp.z + u_stereoC;\n"\
+		"		sp.x += sD / a_pgxp.z + sC;\n"\
 		"		vec4 b = Projection * vec4(sp, a_zw.x, 1.0);\n"\
 		"		float W = a_pgxp.z;\n"\
 		"		if (u_pgxpFarW > 0.0) W = min(W, u_pgxpFarW);\n"\
@@ -2545,10 +2551,10 @@ int g_PsxFogToBlack = 0;
 		GTE_REPROJECT("w0", "a_position.xy")\
 		"				rdone = true;\n"\
 		"			} else\n"\
-		"				up.x += u_stereoD / max(svz, 64.0) + u_stereoC;\n"\
+		"				up.x += sD / max(svz, 64.0) + sC;\n"\
 		"		}\n"\
 		"		else\n"\
-		"			up.x += u_stereoUi;\n"\
+		"			up.x += sU;\n"\
 		"		if (!rdone) gl_Position = Projection * vec4(up, a_zw.x, 1.0);\n"\
 		"	}\n"
 
@@ -2577,8 +2583,21 @@ int g_PsxFogToBlack = 0;
 	"	uniform mat3 u_reprojR;\n"\
 	"	uniform vec3 u_reprojT;\n"\
 	"	uniform vec3 u_reprojHC;\n"\
+	/* Quest eye instancing (PsyX_StereoEyeDraws): one draw, two instances,
+	 * instance 0 = left eye. u_eyeXf = x scale into the shared viewport and
+	 * each eye's x offset; the clip distances keep each eye in its half. */\
+	"#ifdef EYE_INST\n"\
+	"	uniform float u_eyeOn;\n"\
+	"	uniform vec3 u_eyeXf;\n"\
+	"	uniform vec4 u_eyeClip;\n"\
+	"#endif\n"\
 	"	const vec2 c_UVFudge = vec2(0.00025, 0.00025);\n"\
 	"	void main() {\n"\
+	"		float sD = u_stereoD, sC = u_stereoC, sU = u_stereoUi;\n"\
+	"#ifdef EYE_INST\n"\
+	"		float eyeS = (gl_InstanceID == 0) ? -1.0 : 1.0;\n"\
+	"		if (u_eyeOn > 0.5) { sD *= eyeS; sC *= eyeS; sU *= eyeS; }\n"\
+	"#endif\n"\
 	"		v_texcoord = a_texcoord;\n"\
 	"		v_texcoord.xy += a_extra.xy * 0.5;\n"\
 	"		v_color = a_color;\n"\
@@ -2590,6 +2609,17 @@ int g_PsxFogToBlack = 0;
 	"		v_page_clut.xy += c_UVFudge;\n"\
 	"		v_page_clut.zw += c_UVFudge;\n"\
 	GTE_PERSPECTIVE_CORRECTION\
+	"#ifdef EYE_INST\n"\
+	"		if (u_eyeOn > 0.5) {\n"\
+	"			vec2 ec = (eyeS < 0.0) ? u_eyeClip.xy : u_eyeClip.zw;\n"\
+	"			gl_ClipDistance[0] = gl_Position.x - ec.x * gl_Position.w;\n"\
+	"			gl_ClipDistance[1] = ec.y * gl_Position.w - gl_Position.x;\n"\
+	"			gl_Position.x = gl_Position.x * u_eyeXf.x + gl_Position.w * ((eyeS < 0.0) ? u_eyeXf.y : u_eyeXf.z);\n"\
+	"		} else {\n"\
+	"			gl_ClipDistance[0] = 1.0;\n"\
+	"			gl_ClipDistance[1] = 1.0;\n"\
+	"		}\n"\
+	"#endif\n"\
 	/* v_is3d gates dither + bilinear so 2D logos/UI render sharp.
 	 * a_pgxp.z is the PGXP view W: > 0 only on vertices the GTE
 	 * actually projected, which is exactly the 3D content. It only
@@ -2984,6 +3014,32 @@ int GR_Shader_CheckProgramStatus(GLuint program)
 	return 0;
 }
 
+#if defined(__ANDROID__)
+#ifndef GL_CLIP_DISTANCE0_EXT
+#define GL_CLIP_DISTANCE0_EXT 0x3000
+#define GL_CLIP_DISTANCE1_EXT 0x3001
+#endif
+/* GL_EXT_clip_cull_distance present (asked once). Without it the eye passes
+ * keep one draw per eye. */
+static int s_eyeInstSupported = -1;
+static int PsyX_EyeInstSupported(void)
+{
+	if (s_eyeInstSupported < 0)
+	{
+		GLint n = 0, i;
+		s_eyeInstSupported = 0;
+		glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+		for (i = 0; i < n; i++)
+		{
+			const char* e = (const char*)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+			if (e && strcmp(e, "GL_EXT_clip_cull_distance") == 0) { s_eyeInstSupported = 1; break; }
+		}
+		eprintf("[VR-EYEINST] GL_EXT_clip_cull_distance %s\n", s_eyeInstSupported ? "present: eye instancing on" : "missing: one draw per eye");
+	}
+	return s_eyeInstSupported;
+}
+#endif
+
 ShaderID GR_Shader_Compile(const char* source)
 {
 #if defined(ES2_SHADERS)
@@ -3007,6 +3063,21 @@ ShaderID GR_Shader_Compile(const char* source)
 		"#define varying   out\n"
 		"#define attribute in\n"
 		"#define texture2D texture\n";
+#if defined(__ANDROID__)
+	/* eye instancing needs per-vertex clip distances (GL_EXT_clip_cull_distance) */
+	static const char* const GLSL_HEADER_VERT_EYEINST =
+		"#version 300 es\n"
+		"#extension GL_EXT_clip_cull_distance : require\n"
+		"precision highp int;\n"
+		"precision highp float;\n"
+		"#define VERTEX\n"
+		"#define EYE_INST\n"
+		"#define varying   out\n"
+		"#define attribute in\n"
+		"#define texture2D texture\n";
+	if (PsyX_EyeInstSupported())
+		GLSL_HEADER_VERT = GLSL_HEADER_VERT_EYEINST;
+#endif
 
 	const char* GLSL_HEADER_FRAG =
 		"#version 300 es\n"
@@ -3291,8 +3362,14 @@ TextureID GR_CreateRGBATexture(int width, int height, u_char* data /*= nullptr*/
 	return newTexture;
 }
 
+#if defined(__ANDROID__)
+static unsigned s_ucGen = 1;   /* QUEST UNIFORM CACHE generation (see GR_SetTextureShader) */
+#endif
 static void GR_InitialisePSXShader(GTEShader* sh, ShaderID shader)
 {
+#if defined(__ANDROID__)
+	s_ucGen++;   /* QUEST UNIFORM CACHE: programs (re)built */
+#endif
 	sh->shader = shader;
 
 #if USE_OPENGL
@@ -3349,6 +3426,9 @@ static void GR_InitialisePSXShader(GTEShader* sh, ShaderID shader)
 	sh->shadowClipLoc = glGetUniformLocation(sh->shader, "u_shadowClip");
 	sh->shadowFadeDistLoc = glGetUniformLocation(sh->shader, "u_shadowFadeDist");
 	sh->stereoDLoc = glGetUniformLocation(sh->shader, "u_stereoD");
+	sh->eyeOnLoc = glGetUniformLocation(sh->shader, "u_eyeOn");
+	sh->eyeClipLoc = glGetUniformLocation(sh->shader, "u_eyeClip");
+	sh->eyeXfLoc = glGetUniformLocation(sh->shader, "u_eyeXf");
 	sh->stereoCLoc = glGetUniformLocation(sh->shader, "u_stereoC");
 	sh->stereoUiLoc = glGetUniformLocation(sh->shader, "u_stereoUi");
 	sh->stereoWorldLoc = glGetUniformLocation(sh->shader, "u_stereoWorld");
@@ -3672,6 +3752,58 @@ void GR_SetShader(const ShaderID shader)
 }
 
 
+/* QUEST UNIFORM CACHE (Android only; the desktop path is untouched). Every
+ * split re-binds its shader through GR_SetTextureShader, which pushed ~25
+ * uniforms each time - almost all unchanged since the last split - and
+ * every glUniform is a driver call (~22k a frame at 900 splits). Each of the
+ * uniforms below is written ONLY here (checked 18/11/2026), so the last value
+ * per shader is known: a push of the same value is skipped. The stereo,
+ * reprojection, eye, projection, texel and fog-to-black uniforms are also
+ * written by the eye passes and others and are always pushed. The cache
+ * drops a shader's values when its program changes or any GTE shader is
+ * (re)built (s_ucGen, GR_InitialisePSXShader). */
+#if defined(__ANDROID__)
+#define PSYX_UC_SLOTS 28
+typedef struct { const void* sh; GLuint prog; unsigned gen; float v[PSYX_UC_SLOTS][3]; unsigned char ok[PSYX_UC_SLOTS]; } PsyXUniCache;
+static PsyXUniCache s_uc[8];
+static PsyXUniCache* s_ucCur;
+
+static PsyXUniCache* PsyX_UcFor(const void* sh, GLuint prog)
+{
+	int i, freeI = -1;
+	for (i = 0; i < 8; i++)
+	{
+		if (s_uc[i].sh == sh) break;
+		if (s_uc[i].sh == NULL && freeI < 0) freeI = i;
+	}
+	if (i == 8) i = (freeI >= 0) ? freeI : 0;
+	if (s_uc[i].sh != sh || s_uc[i].prog != prog || s_uc[i].gen != s_ucGen)
+	{
+		memset(&s_uc[i], 0, sizeof(s_uc[i]));
+		s_uc[i].sh = sh; s_uc[i].prog = prog; s_uc[i].gen = s_ucGen;
+	}
+	return &s_uc[i];
+}
+
+static inline bool PsyX_UcSame(int slot, float a, float b, float c)
+{
+	PsyXUniCache* u = s_ucCur;
+	if (u->ok[slot] && u->v[slot][0] == a && u->v[slot][1] == b && u->v[slot][2] == c)
+		return true;
+	u->ok[slot] = 1; u->v[slot][0] = a; u->v[slot][1] = b; u->v[slot][2] = c;
+	return false;
+}
+#define UC1I(slot, loc, x)  do { const int   _v = (x); if (!PsyX_UcSame(slot, (float)_v, 0.0f, 0.0f)) glUniform1i(loc, _v); } while (0)
+#define UC1F(slot, loc, x)  do { const float _v = (x); if (!PsyX_UcSame(slot, _v, 0.0f, 0.0f)) glUniform1f(loc, _v); } while (0)
+#define UC2F(slot, loc, x, y) do { const float _a = (x), _b = (y); if (!PsyX_UcSame(slot, _a, _b, 0.0f)) glUniform2f(loc, _a, _b); } while (0)
+#define UC3FV(slot, loc, p) do { const float* _p = (p); if (!PsyX_UcSame(slot, _p[0], _p[1], _p[2])) glUniform3fv(loc, 1, _p); } while (0)
+#else
+#define UC1I(slot, loc, x)    glUniform1i(loc, x)
+#define UC1F(slot, loc, x)    glUniform1f(loc, x)
+#define UC2F(slot, loc, x, y) glUniform2f(loc, x, y)
+#define UC3FV(slot, loc, p)   glUniform3fv(loc, 1, p)
+#endif
+
 static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShader* shader)
 {
 	switch (texFormat)
@@ -3716,6 +3848,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		u_stereoCLoc = shader->stereoCLoc;
 		u_stereoUiLoc = shader->stereoUiLoc;
 		u_stereoWorldLoc = shader->stereoWorldLoc;
+		u_eyeOnLoc = shader->eyeOnLoc; u_eyeXfLoc = shader->eyeXfLoc; u_eyeClipLoc = shader->eyeClipLoc;
 		u_reprojLoc = shader->reprojLoc; u_reprojRLoc = shader->reprojRLoc;
 		u_reprojTLoc = shader->reprojTLoc; u_reprojHCLoc = shader->reprojHCLoc;
 		break;
@@ -3759,6 +3892,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		u_stereoCLoc = shader->stereoCLoc;
 		u_stereoUiLoc = shader->stereoUiLoc;
 		u_stereoWorldLoc = shader->stereoWorldLoc;
+		u_eyeOnLoc = shader->eyeOnLoc; u_eyeXfLoc = shader->eyeXfLoc; u_eyeClipLoc = shader->eyeClipLoc;
 		u_reprojLoc = shader->reprojLoc; u_reprojRLoc = shader->reprojRLoc;
 		u_reprojTLoc = shader->reprojTLoc; u_reprojHCLoc = shader->reprojHCLoc;
 		break;
@@ -3802,6 +3936,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		u_stereoCLoc = shader->stereoCLoc;
 		u_stereoUiLoc = shader->stereoUiLoc;
 		u_stereoWorldLoc = shader->stereoWorldLoc;
+		u_eyeOnLoc = shader->eyeOnLoc; u_eyeXfLoc = shader->eyeXfLoc; u_eyeClipLoc = shader->eyeClipLoc;
 		u_reprojLoc = shader->reprojLoc; u_reprojRLoc = shader->reprojRLoc;
 		u_reprojTLoc = shader->reprojTLoc; u_reprojHCLoc = shader->reprojHCLoc;
 		break;
@@ -3850,6 +3985,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		u_stereoCLoc = shader->stereoCLoc;
 		u_stereoUiLoc = shader->stereoUiLoc;
 		u_stereoWorldLoc = shader->stereoWorldLoc;
+		u_eyeOnLoc = shader->eyeOnLoc; u_eyeXfLoc = shader->eyeXfLoc; u_eyeClipLoc = shader->eyeClipLoc;
 		u_reprojLoc = shader->reprojLoc; u_reprojRLoc = shader->reprojRLoc;
 		u_reprojTLoc = shader->reprojTLoc; u_reprojHCLoc = shader->reprojHCLoc;
 		break;
@@ -3861,8 +3997,11 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 	 * this fallback, every prim got a_zw.y=0 → v_is3d=0 → no dither
 	 * and forced-nearest sampling on actual 3D geometry (visible as
 	 * blocky tree leaves). */
+#if defined(__ANDROID__)
+	s_ucCur = PsyX_UcFor(shader, shader->shader);
+#endif
 	if (u_pgxpEnabledLoc != -1)
-		glUniform1i(u_pgxpEnabledLoc, g_PsxUsePgxp);
+		UC1I(0, u_pgxpEnabledLoc, g_PsxUsePgxp);
 
 	/* PGXP stereo: mono default; the stereo eye passes in GR_DrawTriangles
 	 * set these per eye and reset them to 0 afterwards. */
@@ -3875,42 +4014,42 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 	/* PGXP depth normalize: prev-frame max SZ. Lets the vertex shader turn each
 	 * vertex's unquantized SZ3 into continuous NDC depth (Z-fight fix). */
 	if (u_szMaxLoc != -1)
-		glUniform1f(u_szMaxLoc, PGXP_GetSzMax());
+		UC1F(1, u_szMaxLoc, PGXP_GetSzMax());
 	if (u_worldFarBiasLoc != -1)
-		glUniform1f(u_worldFarBiasLoc, (float)g_PsxPgxpWorldFarBias);
+		UC1F(2, u_worldFarBiasLoc, (float)g_PsxPgxpWorldFarBias);
 	{
 		extern float g_PgxpFarWClamp;
 		if (u_pgxpFarWLoc != -1)
-			glUniform1f(u_pgxpFarWLoc, g_PgxpFarWClamp);
+			UC1F(3, u_pgxpFarWLoc, g_PgxpFarWClamp);
 	}
 
 	if (u_fogColorLoc != -1)
-		glUniform3fv(u_fogColorLoc, 1, g_PsyX_FogColor);
+		UC3FV(4, u_fogColorLoc, g_PsyX_FogColor);
 	if (u_voidProbeLoc != -1)
-		glUniform1i(u_voidProbeLoc, g_PsxVoidProbeArmed == 2 ? 1 : 0);
+		UC1I(5, u_voidProbeLoc, g_PsxVoidProbeArmed == 2 ? 1 : 0);
 
 	if (u_fogToBlackLoc != -1)
 		glUniform1i(u_fogToBlackLoc, g_PsxFogToBlack);
 
 	if (u_fogStrengthLoc != -1)
-		glUniform1f(u_fogStrengthLoc, g_PsyX_FogStrength);
+		UC1F(6, u_fogStrengthLoc, g_PsyX_FogStrength);
 
 	/* Per-pixel flashlight cone. u_flashlightOn is 0 unless BOTH the master
 	 * config flag and the per-frame game push are set, so the OFF path never
 	 * touches the spotlight branch (and the vsz>0 gate also keeps it off). */
 	if (u_flashlightOnLoc != -1)
-		glUniform1i(u_flashlightOnLoc,
-		            (g_PsyX_UsePerPixelFlashlight && g_PsyX_FlashlightActive) ? 1 : 0);
+		UC1I(7, u_flashlightOnLoc,
+		     (g_PsyX_UsePerPixelFlashlight && g_PsyX_FlashlightActive) ? 1 : 0);
 	/* Untextured splits bind g_whiteTexture; tell the lit tail so the beam's
 	 * albedo falls back to the vertex-lit color instead of full white. Keyed on
 	 * the caller's texture, not g_lastBoundTexture — this block runs before the
 	 * bind early-out, so it stays correct across program switches. */
 	if (u_untexturedLoc != -1)
-		glUniform1i(u_untexturedLoc, texture == g_whiteTexture ? 1 : 0);
+		UC1I(8, u_untexturedLoc, texture == g_whiteTexture ? 1 : 0);
 	if (u_flStyleLoc != -1)
-		glUniform1i(u_flStyleLoc, g_PsyX_FlashlightStyle ? 1 : 0);
+		UC1I(9, u_flStyleLoc, g_PsyX_FlashlightStyle ? 1 : 0);
 	if (u_flLightPosLoc != -1)
-		glUniform3fv(u_flLightPosLoc, 1, g_PsyX_FlashlightPos);
+		UC3FV(10, u_flLightPosLoc, g_PsyX_FlashlightPos);
 
 	/* The cone collapses if any of these is degenerate -- a zero direction most of
 	 * all. Reported on change so a backend that lights wrongly can be compared
@@ -3935,7 +4074,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		}
 	}
 	if (u_flDirLoc != -1)
-		glUniform3fv(u_flDirLoc, 1, g_PsyX_FlashlightDir);
+		UC3FV(11, u_flDirLoc, g_PsyX_FlashlightDir);
 	/* FPS mode swaps in its own (tighter/dimmer) cone size + brightness. */
 	float flIntensityActive = g_PsyX_FlashlightFpsMode ? g_PsyX_FlashlightIntensityFps : g_PsyX_FlashlightIntensity;
 	float flSizeActive      = g_PsyX_FlashlightFpsMode ? g_PsyX_FlashlightSizeFps      : g_PsyX_FlashlightSize;
@@ -3944,7 +4083,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		flCol[0] = g_PsyX_FlashlightColor[0] * flIntensityActive;
 		flCol[1] = g_PsyX_FlashlightColor[1] * flIntensityActive;
 		flCol[2] = g_PsyX_FlashlightColor[2] * flIntensityActive;
-		glUniform3fv(u_flColorLoc, 1, flCol);
+		UC3FV(12, u_flColorLoc, flCol);
 	}
 	/* Scale cone coverage by g_PsyX_FlashlightSize: a cone's solid angle is
 	 * ~proportional to (1 - cos(halfAngle)), so scaling that term scales the lit
@@ -3959,12 +4098,12 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		if (flInner < 0.05f) flInner = 0.05f;
 		if (flOuter < 0.05f) flOuter = 0.05f;
 		if (u_flInnerCosLoc != -1)
-			glUniform1f(u_flInnerCosLoc, flInner);
+			UC1F(13, u_flInnerCosLoc, flInner);
 		if (u_flOuterCosLoc != -1)
-			glUniform1f(u_flOuterCosLoc, flOuter);
+			UC1F(14, u_flOuterCosLoc, flOuter);
 	}
 	if (u_flRangeLoc != -1)
-		glUniform1f(u_flRangeLoc, g_PsyX_FlashlightRange);
+		UC1F(15, u_flRangeLoc, g_PsyX_FlashlightRange);
 
 	/* Flashlight shadow map: same gate as the depth pre-pass in DrawAllSplits, so the
 	 * shader only samples the shadow texture on frames one was actually rendered. */
@@ -4004,23 +4143,23 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		}
 
 		if (u_shadowOnLoc != -1)
-			glUniform1i(u_shadowOnLoc, shadowOn);
+			UC1I(16, u_shadowOnLoc, shadowOn);
 		if (shadowOn)
 		{
 			if (u_shadowMatrixLoc != -1)
 				glUniformMatrix4fv(u_shadowMatrixLoc, 1, GL_FALSE, g_shadowLightMatrix);
 			if (u_shadowBiasLoc != -1)
-				glUniform1f(u_shadowBiasLoc, g_PsyX_FlashlightShadowBias);
+				UC1F(17, u_shadowBiasLoc, g_PsyX_FlashlightShadowBias);
 			if (u_shadowNormalOffsetLoc != -1)
-				glUniform1f(u_shadowNormalOffsetLoc, g_PsyX_FlashlightShadowNormalOffset);
+				UC1F(18, u_shadowNormalOffsetLoc, g_PsyX_FlashlightShadowNormalOffset);
 			if (u_shadowStrengthLoc != -1)
-				glUniform1f(u_shadowStrengthLoc, g_PsyX_FlashlightShadowStrength);
+				UC1F(19, u_shadowStrengthLoc, g_PsyX_FlashlightShadowStrength);
 			if (u_shadowClipLoc != -1)
-				glUniform2f(u_shadowClipLoc, g_shadowZNear, g_shadowZFar);
+				UC2F(20, u_shadowClipLoc, g_shadowZNear, g_shadowZFar);
 			if (u_shadowFadeDistLoc != -1)
-				glUniform1f(u_shadowFadeDistLoc, g_PsyX_FlashlightShadowFadeDist);
+				UC1F(21, u_shadowFadeDistLoc, g_PsyX_FlashlightShadowFadeDist);
 			if (u_shadowTexelLoc != -1)
-				glUniform2f(u_shadowTexelLoc, 1.0f / (float)PSYX_SHADOW_MAP_SIZE, 1.0f / (float)PSYX_SHADOW_MAP_SIZE);
+				UC2F(22, u_shadowTexelLoc, 1.0f / (float)PSYX_SHADOW_MAP_SIZE, 1.0f / (float)PSYX_SHADOW_MAP_SIZE);
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, g_shadowDepthTex);
 			glActiveTexture(GL_TEXTURE0);
@@ -4043,8 +4182,8 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 	 * 2D-only states (menus, logos, inventory) without changing the
 	 * config flag. */
 	if (u_ditherForceLoc != -1)
-		glUniform1f(u_ditherForceLoc,
-		            (g_cfg_psxDither && !g_PsxDitherSuppressed) ? 1.0f : 0.0f);
+		UC1F(23, u_ditherForceLoc,
+		     (g_cfg_psxDither && !g_PsxDitherSuppressed) ? 1.0f : 0.0f);
 
 	/* Pixel scale = window width / PSX native (320). Scales the dither
 	 * cell so each PSX-pixel-equivalent on screen gets its own matrix
@@ -4054,7 +4193,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 		float pixelScale = (g_windowWidth > 0)
 			? ((float)g_windowWidth / 320.0f)
 			: 1.0f;
-		glUniform1f(u_pixelScaleLoc, pixelScale);
+		UC1F(24, u_pixelScaleLoc, pixelScale);
 	}
 
 	/* Filtering is a per-FRAME decision (the frame class flips with
@@ -4099,7 +4238,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 	 * magnified four or five times and bilinear-smoothed run into blots -- the
 	 * blurred Japanese and Chinese menus. Everything else keeps the filter. */
 	if (u_bilinearFilterLoc != -1)
-		glUniform1i(u_bilinearFilterLoc,
+		UC1I(25, u_bilinearFilterLoc,
 		            g_PsxSplitIsGlyph       ? 0
 		            : g_PsxDitherSuppressed ? (g_cfg_menuFilter ? 2 : 0)
 		                                    : ((g_cfg_textureFilter > 0) ? 1 : 0));
@@ -4119,7 +4258,7 @@ static void GR_SetTextureShader(TextureID texture, TexFormat texFormat, GTEShade
 			if (taps < 1.0f)  taps = 1.0f;
 		}
 
-		glUniform1f(u_anisoTapsLoc, taps);
+		UC1F(26, u_anisoTapsLoc, taps);
 	}
 
 	if (g_dbg_texturelessMode) {
@@ -7683,8 +7822,18 @@ void GR_UpdateVertexBuffer(const GrVertex* vertices, int num_vertices)
 	 * GPU holds the buffer, so it is largest on tilers and shared-memory iGPUs
 	 * and smallest on a discrete desktop card — but it is never a pessimisation,
 	 * and the size is constant so drivers can recycle identical blocks. */
+#if defined(__ANDROID__)
+	/* Quest (Adreno): orphaning the FULL 17.8 MB buffer (2^18 x 68-byte
+	 * vertices) two or three times a frame left the driver waiting on the GPU
+	 * for storage to come free - gsl_command_waittimestamp under this upload
+	 * was ~35% of the main thread's time in a simpleperf off-CPU profile
+	 * (18/11/2026), most of the "draw lists" ms. Allocate only what this batch
+	 * uses, data in the same call: a fresh block, nothing to wait for. */
+	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)num_vertices * (GLsizeiptr)sizeof(GrVertex), vertices, GL_STREAM_DRAW);
+#else
 	glBufferData(GL_ARRAY_BUFFER, MAX_VERTEX_BUFFER_SIZE * sizeof(GrVertex), NULL, GL_STREAM_DRAW);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, num_vertices * sizeof(GrVertex), vertices);
+#endif
 #else
 #error
 #endif
@@ -7811,6 +7960,33 @@ static void APIENTRY Sh_Disable(GLenum cap)
 	s_realDisable(cap);
 }
 
+#if defined(__ANDROID__)
+/* FAST EYE PASSES (Quest). Each display batch used to switch to the eye
+ * images' framebuffer and back - twice per batch, hundreds of batches a
+ * frame - and on a tiled GPU every switch stores and reloads the tiles. Now
+ * the eye framebuffer stays bound between batches (s_physDrawFbo = what GL
+ * really has) while the copy keeps saying the display; any call that works
+ * on the bound framebuffer goes through PsyX_PhysSync first
+ * (gles_desktop_tokens.h), so it lands where the code meant. The display
+ * itself is not drawn for those batches: in Full VR nothing shows it.
+ * g_PsyX_FastEyes = 0 (config vr_fast_eyes) restores the old path. */
+extern "C" { int g_PsyX_FastEyes = 1; }
+/* Eye instancing (Quest, EYE INSTANCING in PsyX_StereoEyeDraws); config vr_eye_instancing */
+extern "C" { int g_PsyX_EyeInstancing = 1; }
+/* Eye crop (Quest, QUEST EYE CROP before PsyX_StereoEyeDraws); config vr_eye_crop */
+extern "C" { int g_PsyX_EyeCrop = 1; }
+static GLuint s_physDrawFbo = 0;
+
+extern "C" void PsyX_PhysSync(void)
+{
+	if (s_physDrawFbo != s_shDrawFbo)
+	{
+		s_realBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_shDrawFbo);
+		s_physDrawFbo = s_shDrawFbo;
+	}
+}
+#endif
+
 static void APIENTRY Sh_BindFramebuffer(GLenum target, GLuint fb)
 {
 	if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER)
@@ -7818,6 +7994,10 @@ static void APIENTRY Sh_BindFramebuffer(GLenum target, GLuint fb)
 	if (target == GL_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER)
 		s_shReadFbo = fb;
 	s_realBindFramebuffer(target, fb);
+#if defined(__ANDROID__)
+	if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER)
+		s_physDrawFbo = fb;
+#endif
 }
 
 #if defined(__ANDROID__)
@@ -8538,8 +8718,53 @@ static void PsyX_UiLayerDraw(int start_vertex, int triangles,
 }
 
 /* PGXP stereo eye passes: display draws only, never the offscreen VRAM
- * render targets (they are texture generation). */
-static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
+ * render targets (they are texture generation). Returns 1 when the batch went
+ * to the eye images (world), 0 when it did not (skipped, or the UI layer). */
+/* QUEST EYE CROP (vr_full.c VrFull_Push sets it each live frame): the part
+ * of each eye image that eye can see - the image spans the game's 142 x 117
+ * deg view (its 16:9 window), the eye ~94 x 99 deg, so over half of every
+ * eye image was shaded and never shown. The eye passes now shade only that
+ * part (u/v of the eye image, 0..1, with vr_full's margin for head roll and
+ * reprojection): a scissor for the rows (both eyes), the instanced draw's
+ * clip planes - or the per-eye scissor of the two-draw path - for the
+ * columns. Off on the PC (no-op setter). */
+#if defined(__ANDROID__)
+static float s_eyeCrop[2][4] = { { 0.0f, 1.0f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } };
+static int   s_eyeCropOk;
+extern "C" void PsyX_Stereo_SetEyeCrop(int eye, float u0, float u1, float v0, float v1)
+{
+	if (eye < 0 || eye > 1) return;
+	if (u0 < 0.0f) u0 = 0.0f;
+	if (v0 < 0.0f) v0 = 0.0f;
+	if (u1 > 1.0f) u1 = 1.0f;
+	if (v1 > 1.0f) v1 = 1.0f;
+	if (u1 <= u0 || v1 <= v0) { u0 = 0.0f; u1 = 1.0f; v0 = 0.0f; v1 = 1.0f; }
+	s_eyeCrop[eye][0] = u0; s_eyeCrop[eye][1] = u1;
+	s_eyeCrop[eye][2] = v0; s_eyeCrop[eye][3] = v1;
+	s_eyeCropOk = g_PsyX_EyeCrop;
+}
+/* a rectangle (x, y, w, h) cut down to the crop of one eye half */
+static void PsyX_EyeCropRect(int eye, GLint r[4])
+{
+	const int   ox = eye * s_psxStereoW;
+	const GLint x0 = ox + (GLint)floorf(s_eyeCrop[eye][0] * (float)s_psxStereoW);
+	const GLint x1 = ox + (GLint)ceilf(s_eyeCrop[eye][1] * (float)s_psxStereoW);
+	const GLint y0 = (GLint)floorf(s_eyeCrop[eye][2] * (float)s_psxStereoH);
+	const GLint y1 = (GLint)ceilf(s_eyeCrop[eye][3] * (float)s_psxStereoH);
+	GLint a0 = r[0] > x0 ? r[0] : x0, a1 = (r[0] + r[2]) < x1 ? (r[0] + r[2]) : x1;
+	GLint b0 = r[1] > y0 ? r[1] : y0, b1 = (r[1] + r[3]) < y1 ? (r[1] + r[3]) : y1;
+	if (a1 < a0) a1 = a0;
+	if (b1 < b0) b1 = b0;
+	r[0] = a0; r[1] = b0; r[2] = a1 - a0; r[3] = b1 - b0;
+}
+#else
+extern "C" void PsyX_Stereo_SetEyeCrop(int eye, float u0, float u1, float v0, float v1)
+{
+	(void)eye; (void)u0; (void)u1; (void)v0; (void)v1;
+}
+#endif
+
+static int PsyX_StereoEyeDraws(int start_vertex, int triangles)
 {
 #if defined(__ANDROID__)
 	{
@@ -8569,11 +8794,11 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 #endif
 	if (!s_psxStereoActive || s_psxStereoFBO == 0 || g_PreviousOffscreenState ||
 	    (s_stUiScreen && !g_PsyX_FrozenReplay))
-		return;
+		return 0;
 
 	const GLuint prevFbo = s_shDrawFbo;
 	if (prevFbo != GR_ScreenFBO())
-		return;
+		return 0;
 
 	GLint vp[4], sc[4];
 	memcpy(vp, s_shViewport, sizeof(vp));
@@ -8588,7 +8813,7 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 	{
 		PsyX_UiLayerDraw(start_vertex, triangles, vp, sc, scOn);
 		{ const Uint64 dt = SDL_GetPerformanceCounter() - t0; s_psxStereoTicks += dt; s_psxStereoTicksTotal += dt; }
-		return;
+		return 0;
 	}
 
 	/* disparity numerator: (half-IPD in world units) * geom screen
@@ -8610,7 +8835,90 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 	const int eyeDepthWas = s_shDepthOn;
 	if (eyeDepthWas) glDisable(GL_DEPTH_TEST);
 
+#if defined(__ANDROID__)
+	const int fast = g_PsyX_FastEyes;
+	if (fast)
+	{
+		/* stays bound for the next batch; the copy still says the display */
+		if (s_physDrawFbo != s_psxStereoFBO)
+		{
+			s_realBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_psxStereoFBO);
+			s_physDrawFbo = s_psxStereoFBO;
+		}
+	}
+	else
+#endif
 	glBindFramebuffer(GL_FRAMEBUFFER, s_psxStereoFBO);
+#if defined(__ANDROID__)
+	/* EYE INSTANCING (Quest): both eyes in one instanced draw. The shared
+	 * viewport runs from the left eye's rectangle to the right one's; each
+	 * instance is squeezed into its own part (u_eyeXf) and clipped there.
+	 * Needs a full-display scissor (else per-eye scissors would differ) and
+	 * an EYE_INST shader; anything else takes the two draws below. */
+	if (g_PsyX_EyeInstancing && u_eyeOnLoc != -1 && u_eyeXfLoc != -1 && u_eyeClipLoc != -1 && s_eyeInstSupported == 1 &&
+	    (!scOn || (sc[0] <= vp[0] && sc[1] <= vp[1] && sc[0] + sc[2] >= vp[0] + vp[2] && sc[1] + sc[3] >= vp[1] + vp[3])))
+	{
+		const float kx = (g_windowWidth  > 0) ? (float)s_psxStereoW / (float)g_windowWidth  : 1.0f;
+		const float ky = (g_windowHeight > 0) ? (float)s_psxStereoH / (float)g_windowHeight : 1.0f;
+		const int   ex = (int)(vp[0] * kx + 0.5f), ey = (int)(vp[1] * ky + 0.5f);
+		const int   ew = (int)(vp[2] * kx + 0.5f), eh = (int)(vp[3] * ky + 0.5f);
+		const int   ox = s_psxStereoW;
+		const float tw = (float)(ox + ew);
+
+		glViewport(ex, ey, ox + ew, eh);
+		if (s_eyeCropOk)
+		{
+			/* rows: what either eye sees; columns: each eye's own (u_eyeClip) */
+			const float v0 = s_eyeCrop[0][2] < s_eyeCrop[1][2] ? s_eyeCrop[0][2] : s_eyeCrop[1][2];
+			const float v1 = s_eyeCrop[0][3] > s_eyeCrop[1][3] ? s_eyeCrop[0][3] : s_eyeCrop[1][3];
+			GLint y0 = (GLint)floorf(v0 * (float)s_psxStereoH), y1 = (GLint)ceilf(v1 * (float)s_psxStereoH);
+			if (y0 < ey) y0 = ey;
+			if (y1 > ey + eh) y1 = ey + eh;
+			if (y1 < y0) y1 = y0;
+			if (!scOn) glEnable(GL_SCISSOR_TEST);
+			glScissor(ex, y0, ox + ew, y1 - y0);
+		}
+		else if (scOn) glScissor(ex, ey, ox + ew, eh);
+		if (u_eyeClipLoc != -1)
+		{
+			/* each eye's visible columns in its own viewport's NDC */
+			float n[4];
+			int   e;
+			for (e = 0; e < 2; e++)
+			{
+				const float u0 = s_eyeCropOk ? s_eyeCrop[e][0] : 0.0f, u1 = s_eyeCropOk ? s_eyeCrop[e][1] : 1.0f;
+				n[e * 2 + 0] = (ew > 0) ? 2.0f * (u0 * (float)s_psxStereoW - (float)ex) / (float)ew - 1.0f : -1.0f;
+				n[e * 2 + 1] = (ew > 0) ? 2.0f * (u1 * (float)s_psxStereoW - (float)ex) / (float)ew - 1.0f :  1.0f;
+				if (n[e * 2 + 0] < -1.0f) n[e * 2 + 0] = -1.0f;
+				if (n[e * 2 + 1] >  1.0f) n[e * 2 + 1] =  1.0f;
+			}
+			glUniform4f(u_eyeClipLoc, n[0], n[1], n[2], n[3]);
+		}
+		glEnable(GL_CLIP_DISTANCE0_EXT);
+		glEnable(GL_CLIP_DISTANCE1_EXT);
+		glUniform1f(u_eyeOnLoc, 1.0f);
+		/* NDC x of eye e in the shared viewport: x * ew/tw + (2*e*ox + ew)/tw - 1 */
+		glUniform3f(u_eyeXfLoc, (float)ew / tw, (float)ew / tw - 1.0f, (2.0f * (float)ox + (float)ew) / tw - 1.0f);
+		/* the right eye's values; the shader flips the sign for the left one */
+		if (u_stereoDLoc != -1) glUniform1f(u_stereoDLoc, D);
+		if (u_stereoCLoc != -1) glUniform1f(u_stereoCLoc, -C);
+		if (u_stereoUiLoc != -1) glUniform1f(u_stereoUiLoc, Ui);
+		if (u_stereoWorldLoc != -1) glUniform1f(u_stereoWorldLoc, (g_PsxUIOrthoPass && !g_PsyX_FrozenReplay) ? 0.0f : 1.0f);
+		if (g_PsyX_FrozenReplay && u_reprojLoc != -1)
+		{
+			glUniform1f(u_reprojLoc, 1.0f);
+			if (u_reprojRLoc != -1)  glUniformMatrix3fv(u_reprojRLoc, 1, GL_FALSE, s_frzR);
+			if (u_reprojTLoc != -1)  glUniform3fv(u_reprojTLoc, 1, s_frzT);
+			if (u_reprojHCLoc != -1) glUniform3fv(u_reprojHCLoc, 1, s_frzHC);
+		}
+		PsyX_GlReal_DrawArraysInstanced(GL_TRIANGLES, start_vertex, triangles * 3, 2);
+		if (s_eyeCropOk && !scOn) glDisable(GL_SCISSOR_TEST);
+		glUniform1f(u_eyeOnLoc, 0.0f);
+		glDisable(GL_CLIP_DISTANCE0_EXT);
+		glDisable(GL_CLIP_DISTANCE1_EXT);
+	}
+	else
+#endif
 	for (int eyeI = 0; eyeI < 2; eyeI++)
 	{
 		float sgn = (eyeI == 0) ? -1.0f : 1.0f;   /* left, right */
@@ -8622,6 +8930,26 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 
 		glViewport((GLint)(vp[0] * kx + 0.5f) + ox, (GLint)(vp[1] * ky + 0.5f),
 		           (GLsizei)(vp[2] * kx + 0.5f), (GLsizei)(vp[3] * ky + 0.5f));
+#if defined(__ANDROID__)
+		if (s_eyeCropOk)
+		{
+			GLint r[4];
+			if (scOn)
+			{
+				r[0] = (GLint)(sc[0] * kx + 0.5f) + ox; r[1] = (GLint)(sc[1] * ky + 0.5f);
+				r[2] = (GLint)(sc[2] * kx + 0.5f);      r[3] = (GLint)(sc[3] * ky + 0.5f);
+			}
+			else
+			{
+				r[0] = (GLint)(vp[0] * kx + 0.5f) + ox; r[1] = (GLint)(vp[1] * ky + 0.5f);
+				r[2] = (GLint)(vp[2] * kx + 0.5f);      r[3] = (GLint)(vp[3] * ky + 0.5f);
+			}
+			PsyX_EyeCropRect(eyeI, r);
+			if (!scOn && eyeI == 0) glEnable(GL_SCISSOR_TEST);
+			glScissor(r[0], r[1], r[2], r[3]);
+		}
+		else
+#endif
 		if (scOn) glScissor((GLint)(sc[0] * kx + 0.5f) + ox, (GLint)(sc[1] * ky + 0.5f),
 		                    (GLsizei)(sc[2] * kx + 0.5f), (GLsizei)(sc[3] * ky + 0.5f));
 		if (u_stereoDLoc != -1) glUniform1f(u_stereoDLoc, sgn * D);
@@ -8638,9 +8966,16 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 			if (u_reprojHCLoc != -1) glUniform3fv(u_reprojHCLoc, 1, s_frzHC);
 		}
 
+#if defined(__ANDROID__)
+		PsyX_GlReal_DrawArrays(GL_TRIANGLES, start_vertex, triangles * 3);   /* no sync: the eye target is meant */
+#else
 		glDrawArrays(GL_TRIANGLES, start_vertex, triangles * 3);
+#endif
 	}
 	if (u_reprojLoc != -1) glUniform1f(u_reprojLoc, 0.0f);
+#if defined(__ANDROID__)
+	if (s_eyeCropOk && !scOn && s_shScissorOn) glDisable(GL_SCISSOR_TEST);   /* the two-draw path's crop */
+#endif
 
 	/* restore: shift back to 0, display target, viewport, scissor */
 	if (u_stereoDLoc != -1) glUniform1f(u_stereoDLoc, 0.0f);
@@ -8648,10 +8983,14 @@ static void PsyX_StereoEyeDraws(int start_vertex, int triangles)
 	if (u_stereoUiLoc != -1) glUniform1f(u_stereoUiLoc, 0.0f);
 	if (u_stereoWorldLoc != -1) glUniform1f(u_stereoWorldLoc, 0.0f);
 	if (eyeDepthWas) glEnable(GL_DEPTH_TEST);
+#if defined(__ANDROID__)
+	if (!fast)
+#endif
 	glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
 	if (scOn) glScissor(sc[0], sc[1], sc[2], sc[3]);
 	{ const Uint64 dt = SDL_GetPerformanceCounter() - t0; s_psxStereoTicks += dt; s_psxStereoTicksTotal += dt; }
+	return 1;
 }
 
 void GR_DrawTriangles(int start_vertex, int triangles)
@@ -8660,12 +8999,21 @@ void GR_DrawTriangles(int start_vertex, int triangles)
 	if (s_gf.draws++ == 0)
 		GreyFrame_FirstDraw();
 	s_gf.tris += triangles;
-	/* mono draw to the current target - byte-identical to the legacy path.
-	 * The frozen world's replay goes to the eye images only: the flat frame
-	 * is the menu's own (the 2D panel). */
+	/* mono draw to the current target - byte-identical to the legacy path
+	 * (on the Quest after the eye passes). The frozen world's replay goes to
+	 * the eye images only: the flat frame is the menu's own (the 2D panel).
+	 * Quest fast eye passes: a batch the eyes took is not drawn flat (nothing
+	 * shows the flat frame in Full VR), so the eye target stays bound. */
+#if defined(__ANDROID__)
+	if (PsyX_StereoEyeDraws(start_vertex, triangles) && g_PsyX_FastEyes)
+		return;
+	if (!g_PsyX_FrozenReplay)
+		glDrawArrays(GL_TRIANGLES, start_vertex, triangles * 3);
+#else
 	if (!g_PsyX_FrozenReplay)
 		glDrawArrays(GL_TRIANGLES, start_vertex, triangles * 3);
 	PsyX_StereoEyeDraws(start_vertex, triangles);
+#endif
 #else
 #error
 #endif

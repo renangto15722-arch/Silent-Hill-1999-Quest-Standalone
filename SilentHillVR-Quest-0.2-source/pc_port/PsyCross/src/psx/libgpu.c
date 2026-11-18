@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#if defined(__ANDROID__)
+#include "../platform.h"   /* SDL timers for the Quest perf log */
+#endif
 #include <ctype.h>
 
 
@@ -461,7 +464,27 @@ void DrawOTagEnv(u_long* p, DRAWENV* env)
 	DrawOTag(p);
 }
 
+#if defined(__ANDROID__)
+/* Quest perf log (vr_openxr.c [VR-XR] line): CPU time spent turning the
+ * ordering tables into GL draws (parse + submit), summed until taken. */
+static Uint64 s_otTicks = 0;
+double PsyX_Perf_TakeOtMs(void)
+{
+	double ms = (double)s_otTicks * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	s_otTicks = 0;
+	return ms;
+}
+static void DrawOTag_Body(u_long* p);
 void DrawOTag(u_long* p)
+{
+	const Uint64 t0 = SDL_GetPerformanceCounter();
+	DrawOTag_Body(p);
+	s_otTicks += SDL_GetPerformanceCounter() - t0;
+}
+static void DrawOTag_Body(u_long* p)
+#else
+void DrawOTag(u_long* p)
+#endif
 {
 	do
 	{

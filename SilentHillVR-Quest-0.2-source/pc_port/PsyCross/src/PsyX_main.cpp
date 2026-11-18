@@ -224,6 +224,96 @@ int PsyX_Sys_GetVBlankCount()
 	return g_psxSysCounters[PsxCounter_VBLANK];
 }
 
+#if defined(__ANDROID__)
+/* Quest: the desktop loop below never sleeps - it polls gettimeofday flat out
+ * and kept one core at 100% (65% of all the app's CPU samples in a simpleperf
+ * profile, 18/11/2026), heat and power the main thread then lacks. Same
+ * events, but the thread sleeps until the next one is due. Deadlines are kept
+ * on a fixed grid (next += period) instead of restarting the timer when a tick
+ * is seen, so sleep wake-up latency cannot slow the 60 Hz vblank count the
+ * game times itself with. */
+#include <time.h>
+static inline Sint64 Intr_NowNs(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (Sint64)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int intrThreadMain(void* data)
+{
+	const Sint64 rcnt2PeriodNs = (Sint64)(1e9 / 577.8);   /* PSX RCnt2, see the desktop loop */
+	const Sint64 spuPollNs     = 1000000;                 /* PsyX_SPUAL_Update throttles on ms */
+	Sint64 now      = Intr_NowNs();
+	Sint64 nextVbl  = now;
+	Sint64 nextRc2  = now;
+	int    rc2Was   = 0;
+
+	(void)data;
+	Util_InitHPCTimer(&g_vblTimer);
+
+	while (!g_stopIntrThread)
+	{
+		const double timestep = g_vmode == MODE_NTSC ? FIXED_TIME_STEP_NTSC : FIXED_TIME_STEP_PAL;
+		const Sint64 vblNs    = (Sint64)(timestep * 1e9);
+		Sint64 wake;
+
+		now = Intr_NowNs();
+
+		if (now >= nextVbl)
+		{
+			SDL_LockMutex(g_intrMutex);
+
+			if (vsync_callback)
+				vsync_callback();
+
+			SDL_UnlockMutex(g_intrMutex);
+
+			g_psxSysCounters[PsxCounter_VBLANK]++;
+			Util_GetHPCTime(&g_vblTimer, 1);
+
+			nextVbl += vblNs;
+			if (now - nextVbl > 4 * vblNs)   /* stalled (suspend, debugger): resync */
+				nextVbl = now + vblNs;
+		}
+
+		if (g_rcnt2_timer_active)
+		{
+			if (!rc2Was)
+				nextRc2 = now + rcnt2PeriodNs;
+			else if (now >= nextRc2)
+			{
+				SDL_LockMutex(g_intrMutex);
+				PsyX_PumpRCnt2Timer();
+				SDL_UnlockMutex(g_intrMutex);
+
+				nextRc2 += rcnt2PeriodNs;
+				if (now - nextRc2 > 4 * rcnt2PeriodNs)
+					nextRc2 = now + rcnt2PeriodNs;
+			}
+		}
+		rc2Was = g_rcnt2_timer_active;
+
+		PsyX_SPUAL_Update();
+
+		wake = nextVbl;
+		if (g_rcnt2_timer_active && nextRc2 < wake)
+			wake = nextRc2;
+		if (now + spuPollNs < wake)
+			wake = now + spuPollNs;
+
+		if (wake > Intr_NowNs())
+		{
+			struct timespec ts;
+			ts.tv_sec  = (time_t)(wake / 1000000000LL);
+			ts.tv_nsec = (long)(wake % 1000000000LL);
+			clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+		}
+	}
+
+	return 0;
+}
+#else
 int intrThreadMain(void* data)
 {
 	timerCtx_t rcnt2Timer;
@@ -279,6 +369,7 @@ int intrThreadMain(void* data)
 
 	return 0;
 }
+#endif
 
 static int PsyX_Sys_InitialiseCore()
 {
