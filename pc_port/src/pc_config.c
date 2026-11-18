@@ -713,6 +713,12 @@ void PcConfig_Load(const char* path)
             extern int g_PsyX_EyeInstancing;
             g_PsyX_EyeInstancing = (atoi(value) != 0);
         }
+        else if (strcmp(key, "vr_eye_crop") == 0)
+        {
+            /* Quest: shade only what each eye sees (PsyX_render.cpp QUEST EYE CROP) */
+            extern int g_PsyX_EyeCrop;
+            g_PsyX_EyeCrop = (atoi(value) != 0);
+        }
 #endif
         else if (strcmp(key, "snow_size") == 0)
         {
