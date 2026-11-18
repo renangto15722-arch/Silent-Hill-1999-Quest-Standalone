@@ -783,12 +783,19 @@ static const struct { float right, up, fwd, pitch; } s_holsterSlots[6] = {
 
 static int s_ikActive;   /* VrIk_ApplyArms posed the body this frame */
 
-/* The player's standing height, meters: the highest the headset has been
- * above the floor (the tracking space is the floor-level STAGE) over the
- * eye-to-height ratio. Logged when it changes. */
+/* The player's standing height, meters, for the torso's proportions: the
+ * highest the headset has been above the floor (the tracking space is the
+ * floor-level STAGE) over the eye-to-height ratio - once that is a standing
+ * eye (>= VR_STAND_EYE_M). Played seated the eye never gets there (1.20 m
+ * read as a 1.29 m person put the chest holster 23 cm under the eyes), so
+ * until then an average adult's VR_SEATED_H_M. Logged when it changes. */
+#define VR_STAND_EYE_M 1.40f
+#define VR_SEATED_H_M  1.70f
+static float s_eyeMax;
+
 static float PlayerHeightM(const HeadFrame* f)
 {
-    static float s_eyeMax = 0.0f, s_logged = 0.0f;
+    static float s_logged = 0.0f;
     float        h;
 
     /* measured, never vr_player_height: that key sizes Harry's skeleton, has
@@ -796,16 +803,36 @@ static float PlayerHeightM(const HeadFrame* f)
      * 1.90 m body would have it */
     if (f->hp[1] > s_eyeMax && f->hp[1] < 2.10f)
         s_eyeMax = f->hp[1];
-    h = (s_eyeMax > 0.9f ? s_eyeMax : 1.55f) / VR_EYE_TO_HEIGHT;
-    if (h < 1.20f) h = 1.20f;
+    h = (s_eyeMax >= VR_STAND_EYE_M) ? s_eyeMax / VR_EYE_TO_HEIGHT : VR_SEATED_H_M;
     if (h > 2.20f) h = 2.20f;
     if (fabsf(h - s_logged) > 0.02f)
     {
         s_logged = h;
-        VrOvr_Log("[VR-IK] holsters for a player %.2f m tall (headset up to %.2f m above the floor)\n",
-                  (double)h, (double)s_eyeMax);
+        VrOvr_Log("[VR-IK] holsters for a body %.2f m tall (%s; headset up to %.2f m above the floor)\n",
+                  (double)h, s_eyeMax >= VR_STAND_EYE_M ? "measured standing" : "seated: average adult",
+                  (double)s_eyeMax);
     }
     return h;
+}
+
+/* The eye height the holsters hang from (tracking meters): follows the
+ * headset up at once but down only slowly, so bending to reach a holster
+ * does not take the holster down with the head - while sitting down or
+ * standing up still moves the whole body within a few seconds. Updated once
+ * a frame (VirtualBodyUpdate). */
+#define VR_EYE_DOWN_S 4.0f
+static float s_eyeRef;
+static int   s_eyeRefOk;
+
+static void EyeRefUpdate(float eyeY, float dt)
+{
+    if (!s_eyeRefOk || eyeY > s_eyeRef)
+    {
+        s_eyeRef   = eyeY;
+        s_eyeRefOk = 1;
+        return;
+    }
+    s_eyeRef += (eyeY - s_eyeRef) * (1.0f - expf(-dt / VR_EYE_DOWN_S));
 }
 
 /* VIRTUAL BODY (body yaw relative to the head): which way the player's torso
@@ -874,6 +901,7 @@ static void VirtualBodyUpdate(void)
     dt = s_vbOk ? (float)(now - s_vbTicks) / 1000.0f : 1.0f;
     if (dt > 0.25f) dt = 0.25f;
     s_vbTicks = now;
+    EyeRefUpdate(f.hp[1], dt);
     if (!s_vbOk)
     {
         s_vbFwd[0] = tx; s_vbFwd[1] = tz;
@@ -924,8 +952,8 @@ static void HolsterFrame(const HeadFrame* f, float out[3][3])
 
 /* A slot's spot in the world (Q8, exact): from the eyes straight down the
  * WORLD's vertical (not the camera's: its walk sway turned that 70 cm drop
- * and swung the holsters at every step) to the slot's height above the real
- * floor, back along the head's facing to the spine, then out along the
+ * and swung the holsters at every step) by the torso's proportion under the
+ * eyes (EyeRefUpdate), back along the head's facing to the spine, then out along the
  * virtual body's right and forward - real meters at the hands' scale
  * (ReachScale), so the hand and the holster agree. 0 = no head pose. */
 static int SlotWorldT(int slot, double t[3])
@@ -948,7 +976,10 @@ static int SlotWorldT(int slot, double t[3])
         if (!Flat2(&fx, &fz)) { fx = body[0][2]; fz = body[2][2]; }
         hw[0] = fx; hw[1] = 0.0f; hw[2] = fz;
     }
-    drop = (f.hp[1] - s_holsterSlots[slot].up * H) * rs;   /* world y is down */
+    /* under the eyes by the torso's proportion (eye 0.936 H), from the
+     * slow eye reference - standing or seated alike; world y is down */
+    drop = (f.hp[1] - (s_eyeRefOk ? s_eyeRef : f.hp[1]) +
+            (VR_EYE_TO_HEIGHT - s_holsterSlots[slot].up) * H) * rs;
     back = VR_EYE_AHEAD_H * H * rs;
     for (i = 0; i < 3; i++)
         t[i] = (double)f.cam.t[i] + (double)((i == 1 ? drop : 0.0f) - hw[i] * back +
