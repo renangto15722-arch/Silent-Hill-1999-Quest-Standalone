@@ -482,6 +482,17 @@ int VrTracking_GetUiContext(void)
             extern int g_PsxPresentLastFrame;
             if (g_SysWork.sysState != SysState_Gameplay && g_Pc2dBackgroundActive > 0)
                 return 1;
+            /* Scripted paper-map scenes (a new objective: the map zooms in,
+             * arrow, "Cheryl" - map2_s00 / map1_s06 via Event_PaperMapCmd)
+             * draw the map with the tile renderer (func_800692A4) instead of
+             * Screen_BackgroundImgDraw, so the flag above stays 0 and the
+             * map was taken for the world and blown up over the whole view.
+             * Those events raise g_PcMapScreenActive while the map is up. */
+            {
+                extern int g_PcMapScreenActive;
+                if (g_SysWork.sysState != SysState_Gameplay && g_PcMapScreenActive)
+                    return 1;
+            }
             /* An event that froze the world - the take screen of a pickup
              * (the item model turning, the paper map) - shows the game's own
              * screen on the 2D panel over the frozen stereo world. */
