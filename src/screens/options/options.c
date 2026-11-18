@@ -464,9 +464,9 @@ static s_PcOpt s_vrObjRows[VROBJ_MAX_ROWS];
 
 /* the seven settings, as rows: label, which value, range, step */
 static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_WEAPON_ROWS[7] = {
-    { "______Position_X_cm", 2, -20.0f,  20.0f, 0.5f },   /* vrGrip[]: fwd up right pitch yaw roll */
-    { "______Position_Y_cm", 1, -20.0f,  20.0f, 0.5f },
-    { "______Position_Z_cm", 0, -20.0f,  20.0f, 0.5f },
+    { "______Position_X_cm", 2, -50.0f,  50.0f, 0.5f },   /* vrGrip[]: fwd up right pitch yaw roll */
+    { "______Position_Y_cm", 1, -50.0f,  50.0f, 0.5f },
+    { "______Position_Z_cm", 0, -50.0f,  50.0f, 0.5f },
     { "______Rotation_X_deg", 3, -180.0f, 180.0f, 5.0f },
     { "______Rotation_Y_deg", 4, -180.0f, 180.0f, 5.0f },
     { "______Rotation_Z_deg", 5, -180.0f, 180.0f, 5.0f },
@@ -475,9 +475,9 @@ static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_WEA
 /* a gun's own aim (vrGunAim, added to vr_aim_*): where the shot, laser and
  * dot leave from and which way they go, per gun (vr_ik.c VrIk_GetGunRay) */
 static const struct { const char* name; int idx; float lo, hi, step; } VROBJ_AIM_ROWS[5] = {
-    { "______Aim_X_cm",  2, -20.0f, 20.0f, 0.5f },   /* vrGunAim[]: fwd up right pitch yaw */
-    { "______Aim_Y_cm",  1, -20.0f, 20.0f, 0.5f },
-    { "______Aim_Z_cm",  0, -20.0f, 20.0f, 0.5f },
+    { "______Aim_X_cm",  2, -50.0f, 50.0f, 0.5f },   /* vrGunAim[]: fwd up right pitch yaw */
+    { "______Aim_Y_cm",  1, -50.0f, 50.0f, 0.5f },
+    { "______Aim_Z_cm",  0, -50.0f, 50.0f, 0.5f },
     { "______Aim_Pitch_deg", 3, -45.0f, 45.0f, 1.0f },
     { "______Aim_Yaw_deg", 4, -45.0f, 45.0f, 1.0f },
 };
