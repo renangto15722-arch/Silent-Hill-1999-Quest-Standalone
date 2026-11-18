@@ -259,6 +259,7 @@ s_PcConfig g_PcConfig = {
     .vrWWheelWidth       = 30.0f,  /* cm (1.3 : 1) */
     .vrWWheelHeight      = 23.0f,  /* cm */
     .vrHolsterFwd        = 8.0f,   /* cm: Renan, "holsters mais pra frente" */
+    .vrGrabReach         = 6.0f,   /* cm: Renan, more reach, same box (was a fixed 2) */
     .vrCameraHeight      = 0.0f,
     .vrPlayerHeight      = 0.0f,
     .vrGrabRadius        = 0.35f,  /* m */
@@ -1418,6 +1419,11 @@ void PcConfig_Load(const char* path)
         {
             float v = (float)atof(value);
             g_PcConfig.vrWWheelHeight = (v < 10.0f) ? 10.0f : (v > 50.0f) ? 50.0f : v;
+        }
+        else if (strcmp(key, "vr_hbox_reach") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrGrabReach = (v < 0.0f) ? 0.0f : (v > 20.0f) ? 20.0f : v;
         }
         else if (strcmp(key, "vr_hbox_fwd") == 0)
         {

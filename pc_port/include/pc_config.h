@@ -407,6 +407,7 @@ typedef struct {
     float vrWWheelWidth;    /* VR: weapon wheel oval width, cm, 15..60 (vr_wwheel_width) */
     float vrWWheelHeight;   /* VR: weapon wheel oval height, cm, 10..50 (vr_wwheel_height) */
     float vrHolsterFwd;     /* VR: every holster (the map's too) moved forward, cm, -20..30 (vr_hbox_fwd) */
+    float vrGrabReach;      /* VR: a holster takes the hand this far outside its box too, cm, 0..20 (vr_hbox_reach) */
     int   vrHeadLock;       /* VR: camera locked to Harry's head, physical head translation ignored (vr_head_lock) */
     float vrGrabRadius;     /* VR: right grip picks up an item this close to the hand, meters, 0.1..1.5 (vr_grab_radius) */
     float vrWheelSize;      /* VR: radial wheel size in %, 100 = 20 deg radius, 50..200 (vr_wheel_size) */

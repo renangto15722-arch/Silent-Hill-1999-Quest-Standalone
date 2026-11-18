@@ -301,11 +301,11 @@ int VrInteract_HolsterState(void)
  * over the half edge: <= 1 = inside, 0 = at the centre. */
 extern void  VrIk_BodyFrame(float out[3][3]);
 extern float VrIk_HandScale(void);
-#define VR_BOX_MARGIN_M 0.02f
 
 static float BoxHalfM(void)
 {
-    return (g_PcConfig.vrBoxSize * 0.005f + VR_BOX_MARGIN_M) * VrIk_HandScale();
+    /* the box, plus Grab_Reach around it (the box itself keeps its size) */
+    return (g_PcConfig.vrBoxSize * 0.005f + g_PcConfig.vrGrabReach * 0.01f) * VrIk_HandScale();
 }
 
 static float HandInBox(const VECTOR3* hand, const VECTOR3* centre)
