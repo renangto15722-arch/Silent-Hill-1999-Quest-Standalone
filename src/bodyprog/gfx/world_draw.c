@@ -8,6 +8,7 @@
 #include "pc_playas.h"
 #include "hires_override.h" /* VR holster textures: virtual pool slots */
 #include <stdlib.h>
+#include <math.h>   /* VR grab box fit (lrint) */
 #ifdef SH_PC_PORT
 #include "main/fileinfo.h" /* g_GameRegion — PAL BG_ETC material-UV relocation */
 #endif
@@ -1079,6 +1080,7 @@ typedef struct
     s_FsImageDesc desc;
     u8            ready;
     u8            failed;
+    float         bmin[3], bmax[3];   /* the PLM's bounds (model units = world Q8), for the grab box fit */
 } PcVrHolsterModel;
 
 static PcVrHolsterModel s_vrHolsterModels[12];   /* PcConfig_HolsterWeapon index */
@@ -1165,18 +1167,47 @@ static void VrHolster_Load(int widx)
     Lm_MaterialFsImageApply1(lmHdr, texName, &h->desc, BlendMode_Additive);
     Lm_MaterialFlagsApply(lmHdr);
     Bone_ModelAssign(&h->bone, lmHdr, 0);
+    {
+        /* model 0's bounds: what the grab box fits */
+        int m, i, any = 0;
+        for (i = 0; i < 3; i++) { h->bmin[i] = 0.0f; h->bmax[i] = 0.0f; }
+        if (lmHdr->modelCount > 0)
+        {
+            s_ModelHeader* mh = &lmHdr->modelHdrs[0];
+            for (m = 0; m < mh->meshCount; m++)
+            {
+                s_MeshHeader* me = &mh->meshHdrs[m];
+                for (i = 0; i < me->vertexCount; i++)
+                {
+                    const float v[3] = { (float)me->verticesXy[i].vx, (float)me->verticesXy[i].vy, (float)me->verticesZ[i] };
+                    int a;
+                    for (a = 0; a < 3; a++)
+                    {
+                        if (!any || v[a] < h->bmin[a]) h->bmin[a] = v[a];
+                        if (!any || v[a] > h->bmax[a]) h->bmax[a] = v[a];
+                    }
+                    any = 1;
+                }
+            }
+        }
+    }
     h->ready = 1;
     {
         extern void VrOvr_Log(const char* fmt, ...);
-        VrOvr_Log("[VR-HOLSTER] weapon %d model loaded (%d bytes, texture %s)\n", itemId, (int)size, texName);
+        VrOvr_Log("[VR-HOLSTER] weapon %d model loaded (%d bytes, texture %s), bounds %.0f..%.0f %.0f..%.0f %.0f..%.0f\n",
+                  itemId, (int)size, texName, (double)h->bmin[0], (double)h->bmax[0], (double)h->bmin[1],
+                  (double)h->bmax[1], (double)h->bmin[2], (double)h->bmax[2]);
     }
 }
 
-/* Game update: load the next holstered weapon still without its copy. */
+/* Game update: load the next holstered weapon still without its copy - with
+ * the weapon wheel, every weapon Harry owns, so the wheel shows them at once. */
 void Pc_VrHolsterModelsUpdate(void)
 {
     extern int VrIk_HolsterSlotItem(int slot);
     extern void VrWeaponHd_Update(void);
+    extern int VrInteract_WheelMode(void);
+    extern int Pc_VrOwnsWeapon(u8 id);
     int k;
     VrWeaponHd_Update();
     for (k = 0; k < 6; k++)
@@ -1188,30 +1219,153 @@ void Pc_VrHolsterModelsUpdate(void)
             return;
         }
     }
+    if (VrInteract_WheelMode())
+    {
+        for (k = 1; k <= 11; k++)
+        {
+            const int id = PcConfig_HolsterWeapon(k);
+            if (id && Pc_VrOwnsWeapon((u8)id) && !s_vrHolsterModels[k].ready && !s_vrHolsterModels[k].failed)
+            {
+                VrHolster_Load(k);
+                return;
+            }
+        }
+    }
 }
 
-/* Every slot's weapon: original while it is in the holster, all black while
- * it is in the hand (the equipped weapon, drawn). */
+/* A weapon sized to fit a grab box (vr_holster_box.c) and centred in it:
+ * rot = how it hangs (unit), centre = the box centre (world Q8, exact),
+ * edgeQ8 = the box edge. Its longest side takes 80% of the edge. The
+ * close-up model (vr_weapon_hd.c) is fitted onto the PLM, so the PLM's
+ * bounds fit both; its own Scale setting is not used here. */
+static void Pc_VrWeaponInBoxDraw(int id, int w, const float rot[3][3], const double centre[3], float edgeQ8, int black)
+{
+    extern void  Vw_PcExactLocalSet(const MATRIX* rounded, const double m[9], const double t[3]);
+    extern int   g_VrWeaponHdNoScale;
+    extern float g_PsyX_CharaFade;
+    static GsCOORDINATE2 s_boxCoord;
+    const PcVrHolsterModel* h = &s_vrHolsterModels[w];
+    MATRIX worldMat, viewMat;
+    float  ext = 0.0f, mid[3], k;
+    double em[9], et[3];
+    int    i, j;
+
+    for (i = 0; i < 3; i++)
+    {
+        const float e = h->bmax[i] - h->bmin[i];
+        if (e > ext) ext = e;
+        mid[i] = 0.5f * (h->bmax[i] + h->bmin[i]);
+    }
+    if (ext < 1.0f)
+        return;
+    k = 0.8f * edgeQ8 / ext;
+    for (i = 0; i < 3; i++)
+    {
+        double c = 0.0;
+        for (j = 0; j < 3; j++)
+        {
+            em[i * 3 + j] = (double)rot[i][j] * k;
+            c += em[i * 3 + j] * mid[j];
+            s_boxCoord.coord.m[i][j] = (s16)lrint(em[i * 3 + j] * 4096.0);
+        }
+        et[i] = centre[i] - c;
+        s_boxCoord.coord.t[i] = (s32)lrint(et[i]);
+    }
+    s_boxCoord.super = NULL;
+    s_boxCoord.flg   = 0;
+    Vw_PcExactLocalSet(&s_boxCoord.coord, em, et);
+
+    {
+        extern int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black);
+        extern float g_PsyX_CharaFade;
+        int drawn;
+        g_VrWeaponHdNoScale = 1;
+        if (black) g_PsyX_CharaFade = 1.0f;
+        drawn = VrWeaponHd_Draw(id, &s_boxCoord, black);
+        if (black) g_PsyX_CharaFade = 0.0f;
+        g_VrWeaponHdNoScale = 0;
+        if (drawn)
+            return;
+    }
+    Vw_CoordToWorldAndViewMatrices(&s_boxCoord, &worldMat, &viewMat);
+    if (black)
+    {
+        CVECTOR tint = g_WorldEnvWork.worldTintColor;
+        func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
+                      0, 0, 0, g_WorldEnvWork.screenBrightness);
+        g_PsyX_CharaFade = 1.0f;
+        func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
+        g_PsyX_CharaFade = 0.0f;
+        func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
+                      tint.r << 5, tint.g << 5, tint.b << 5, g_WorldEnvWork.screenBrightness);
+    }
+    else
+    {
+        func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
+    }
+}
+
+/* The open weapon wheel (vr_interact.c): each owned weapon in its box. */
+static void Pc_VrWeaponWheelDraw(void)
+{
+    extern int   VrInteract_WeaponWheel(VECTOR3* centre, float frame[3][3], u8* ids, VECTOR3* slots, float* half, int* sel);
+    extern int   VrIk_WheelItemRotation(const float frame[3][3], float out[3][3]);
+    extern void  VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float halfM, int hot);
+    VECTOR3 centre, slots[11];
+    float   frame[3][3], rot[3][3], half;
+    u8      ids[11];
+    int     n, sel, i;
+
+    n = VrInteract_WeaponWheel(&centre, frame, ids, slots, &half, &sel);
+    if (n <= 0 || !VrIk_WheelItemRotation(frame, rot))
+        return;
+    for (i = 0; i < n; i++)
+    {
+        const int w = VrHolster_WeaponIndex(ids[i]);
+        VrBox_Draw(&g_OrderingTable0[g_ActiveBufferIdx], &slots[i], frame, half, i == sel);
+        if (w && s_vrHolsterModels[w].ready)
+        {
+            const double c[3] = { slots[i].vx / 16.0, slots[i].vy / 16.0, slots[i].vz / 16.0 };
+            Pc_VrWeaponInBoxDraw(ids[i], w, rot, c, half * 2.0f * 256.0f, 0);
+        }
+    }
+}
+
+/* Every slot's box (vr_holster_box.c; lit while a hand is in it) and its
+ * weapon sized to fit in it: original while it is in the holster, all black
+ * while it is in the hand (the equipped weapon, drawn). The map's holster
+ * shows its box too (pc_minimap.c draws the folded map). Then the open
+ * weapon wheel. */
 static void Pc_VrHolstersDraw(void)
 {
-    extern int VrIk_HolsterSlotItem(int slot);
-    extern int VrIk_HolsterSlotMatrix(int slot, MATRIX* out);
-    extern int VrInteract_HolsterState(void);
-    extern float g_PsyX_CharaFade;
-    static GsCOORDINATE2 s_slotCoord;
-    MATRIX worldMat, viewMat;
-    int    k;
+    extern int   VrIk_HolsterSlotItem(int slot);
+    extern int   VrIk_HolsterSlotPose(int slot, float rot[3][3], double t[3]);
+    extern int   VrIk_HolsterSlotWorld(int slot, VECTOR3* out);
+    extern int   VrIk_MapHolsterSlot(void);
+    extern void  VrIk_BodyFrame(float out[3][3]);
+    extern float VrIk_HandScale(void);
+    extern int   VrInteract_HolsterState(void);
+    extern int   VrInteract_HandInSlotBox(int slot);
+    extern void  VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float halfM, int hot);
+    const float  edgeM = g_PcConfig.vrBoxSize * 0.01f * VrIk_HandScale();
+    float        body[3][3];
+    int          k;
 
     { extern void VrWeaponHd_DebugShow(void); VrWeaponHd_DebugShow(); }   /* SH1VR_WPNHD_SHOW */
+    VrIk_BodyFrame(body);
     for (k = 0; k < 6; k++)
     {
         const int id = VrIk_HolsterSlotItem(k);
         const int w  = VrHolster_WeaponIndex(id);
+        VECTOR3   at;
+        float     rot[3][3];
+        double    t[3];
         int       black;
-        if (!w || !s_vrHolsterModels[w].ready || !VrIk_HolsterSlotMatrix(k, &s_slotCoord.coord))
+
+        if ((id || k == VrIk_MapHolsterSlot()) && VrIk_HolsterSlotWorld(k, &at))
+            VrBox_Draw(&g_OrderingTable0[g_ActiveBufferIdx], &at, body, edgeM * 0.5f, VrInteract_HandInSlotBox(k));
+        if (!w || !s_vrHolsterModels[w].ready || !VrIk_HolsterSlotPose(k, rot, t))
             continue;
-        s_slotCoord.super = NULL;
-        s_slotCoord.flg   = 0;
         black = (id == g_SavegamePtr->equippedWeapon && VrInteract_HolsterState() == 0);
         {
             /* [VR-HOLSTER] what each slot shows, when it changes */
@@ -1223,35 +1377,9 @@ static void Pc_VrHolstersDraw(void)
                 VrOvr_Log("[VR-HOLSTER] slot %d: weapon %d %s\n", k, id, black ? "BLACK (in the hand)" : "original (holstered)");
             }
         }
-        {
-            /* the weapon's inventory close-up model (vr_weapon_hd.c) */
-            extern int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black);
-            extern float g_PsyX_CharaFade;
-            int drawn;
-            if (black) g_PsyX_CharaFade = 1.0f;
-            drawn = VrWeaponHd_Draw(id, &s_slotCoord, black);
-            if (black) g_PsyX_CharaFade = 0.0f;
-            if (drawn)
-                continue;
-        }
-        Vw_CoordToWorldAndViewMatrices(&s_slotCoord, &worldMat, &viewMat);
-        if (black)
-        {
-            /* no world tint, no light, no flashlight */
-            CVECTOR tint = g_WorldEnvWork.worldTintColor;
-            func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
-                          0, 0, 0, g_WorldEnvWork.screenBrightness);
-            g_PsyX_CharaFade = 1.0f;
-            func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
-            g_PsyX_CharaFade = 0.0f;
-            func_80055330(g_WorldEnvWork.field_0, g_WorldEnvWork.field_20, g_WorldEnvWork.field_3,
-                          tint.r << 5, tint.g << 5, tint.b << 5, g_WorldEnvWork.screenBrightness);
-        }
-        else
-        {
-            func_80057090(&s_vrHolsterModels[w].bone.modelInfo, &g_OrderingTable0[g_ActiveBufferIdx], 1, &viewMat, &worldMat, 0);
-        }
+        Pc_VrWeaponInBoxDraw(id, w, rot, t, edgeM * 256.0f, black);
     }
+    Pc_VrWeaponWheelDraw();
 }
 #endif
 

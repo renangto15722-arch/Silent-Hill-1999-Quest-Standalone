@@ -252,6 +252,12 @@ s_PcConfig g_PcConfig = {
     .vrHeadLock          = 0,
     .vrHolsterOn         = 1,
     .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
+    .vrWeaponSelect      = 0,      /* holsters */
+    .vrBoxSize           = 16.0f,  /* cm */
+    .vrBoxOpacity        = 30.0f,  /* % */
+    .vrWWheelDist        = 12.0f,  /* cm */
+    .vrWWheelWidth       = 30.0f,  /* cm (1.3 : 1) */
+    .vrWWheelHeight      = 23.0f,  /* cm */
     .vrCameraHeight      = 0.0f,
     .vrPlayerHeight      = 0.0f,
     .vrGrabRadius        = 0.35f,  /* m */
@@ -1382,6 +1388,35 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_holster") == 0)
         {
             g_PcConfig.vrHolsterOn = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_weapon_select") == 0)
+        {
+            g_PcConfig.vrWeaponSelect = (atoi(value) == 1) ? 1 : 0;
+        }
+        else if (strcmp(key, "vr_hbox_size") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrBoxSize = (v < 8.0f) ? 8.0f : (v > 30.0f) ? 30.0f : v;
+        }
+        else if (strcmp(key, "vr_hbox_opacity") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrBoxOpacity = (v < 0.0f) ? 0.0f : (v > 100.0f) ? 100.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_dist") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelDist = (v < 0.0f) ? 0.0f : (v > 40.0f) ? 40.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_width") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelWidth = (v < 15.0f) ? 15.0f : (v > 60.0f) ? 60.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_height") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelHeight = (v < 10.0f) ? 10.0f : (v > 50.0f) ? 50.0f : v;
         }
         else if (strncmp(key, "vr_holster_", 11) == 0)
         {

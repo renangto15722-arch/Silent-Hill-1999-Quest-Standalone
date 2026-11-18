@@ -791,12 +791,13 @@ int VrIk_WeaponOwned(int itemId)
     return itemId != 0 && OwnsWeapon(itemId);
 }
 
-/* The weapon in a slot (inventory id), 0 = none: holsters off, nothing
- * picked, not owned, or the same weapon already in an earlier slot. */
+/* The weapon in a slot (inventory id), 0 = none: the weapon wheel is used
+ * instead of the holsters, nothing picked, not owned, or the same weapon
+ * already in an earlier slot. */
 int VrIk_HolsterSlotItem(int slot)
 {
     int id, k;
-    if (!g_PcConfig.vrHolsterOn || slot < 0 || slot >= 6)
+    if (g_PcConfig.vrWeaponSelect != 0 || slot < 0 || slot >= 6)
         return 0;
     id = PcConfig_HolsterWeapon(g_PcConfig.vrHolsterSlot[slot]);
     if (!id || !OwnsWeapon(id))
@@ -865,6 +866,68 @@ int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
     return 1;
 }
 
+/* GRAB BOXES (vr_holster_box.c, world_draw.c, vr_interact.c). The body's
+ * frame (columns right, down, forward), the size the hands and what they hold
+ * are drawn at (1 / World_Scale), and a holster slot's pose without any scale:
+ * rot = the weapon's turn in it, t = its spot (world Q8, exact). */
+void VrIk_BodyFrame(float out[3][3])
+{
+    BodyRotation(out);
+}
+
+float VrIk_HandScale(void)
+{
+    return HandScale();
+}
+
+/* The pitch turn about the frame's right axis, then the relaxed hand (K):
+ * how a weapon hangs in a holster - and in a weapon wheel slot. */
+static void SlotItemRotation(const float frame[3][3], float pitchDeg, float out[3][3])
+{
+    const float a = pitchDeg * (3.14159265f / 180.0f);
+    float       px[3][3], r[3][3];
+    px[0][0] = 1.0f; px[0][1] = 0.0f;     px[0][2] = 0.0f;
+    px[1][0] = 0.0f; px[1][1] = cosf(a);  px[1][2] = -sinf(a);
+    px[2][0] = 0.0f; px[2][1] = sinf(a);  px[2][2] = cosf(a);
+    RotMul(px, s_handK[1], r);
+    RotMul(frame, r, out);
+}
+
+int VrIk_HolsterSlotPose(int slot, float rot[3][3], double t[3])
+{
+    float body[3][3], local[3], ofs[3];
+    const float u = VR_IK_UNITS_PER_M;
+    int   i;
+
+    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1])
+        return 0;
+    BodyRotation(body);
+    local[0] = s_holsterSlots[slot].right * u * s_bodyScaleApplied;
+    local[1] = -s_holsterSlots[slot].up * u * s_bodyScaleApplied;
+    local[2] = s_holsterSlots[slot].fwd * u * s_bodyScaleApplied;
+    RotVec(body, local, ofs);
+    SlotItemRotation(body, s_holsterSlots[slot].pitch, rot);
+    for (i = 0; i < 3; i++)
+        t[i] = s_rootExactT[i] + ofs[i];
+    return 1;
+}
+
+/* A weapon in a weapon wheel slot hangs like one in a chest holster, in the
+ * wheel's own frame, turned a quarter about the vertical so its side - not
+ * its edge - faces the player. 0 while the relaxed hand is not read yet. */
+int VrIk_WheelItemRotation(const float frame[3][3], float out[3][3])
+{
+    float turned[3][3], ry[3][3];
+    if (!s_ikActive || !s_handKnown[1])
+        return 0;
+    ry[0][0] = 0.0f;  ry[0][1] = 0.0f; ry[0][2] = 1.0f;
+    ry[1][0] = 0.0f;  ry[1][1] = 1.0f; ry[1][2] = 0.0f;
+    ry[2][0] = -1.0f; ry[2][1] = 0.0f; ry[2][2] = 0.0f;
+    RotMul(frame, ry, turned);
+    SlotItemRotation(turned, 90.0f, out);
+    return 1;
+}
+
 /* A slot's spot in world Q12, for the grab test (vr_interact.c). */
 int VrIk_HolsterSlotWorld(int slot, VECTOR3* out)
 {
@@ -886,12 +949,12 @@ int VrIk_HolsterSlotWorld(int slot, VECTOR3* out)
 #define VR_MAP_FOLDED      0.40f    /* folded in the holster: this much of the sheet */
 #define VR_MAP_FOLDED_TILT 60.0f    /* deg from upright: the holstered map lies back, its face up, to be seen looking down */
 
-/* The holster slot holding the map, -1 for none (holsters off, or no slot set to Map). */
+/* The holster slot holding the map, -1 for none (no slot set to Map). The map
+ * keeps its holster with the weapon wheel too: the wheel only replaces the
+ * weapon holsters. */
 int VrIk_MapHolsterSlot(void)
 {
     int k;
-    if (!g_PcConfig.vrHolsterOn)
-        return -1;
     for (k = 0; k < 6; k++)
         if (g_PcConfig.vrHolsterSlot[k] == PCCFG_HOLSTER_MAP) return k;
     return -1;

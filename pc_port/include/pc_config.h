@@ -400,6 +400,12 @@ typedef struct {
     int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
     int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
     int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */
+    int   vrWeaponSelect;   /* VR: how weapons are taken: 0 = holsters on the body, 1 = weapon wheel on the right grip (vr_weapon_select) */
+    float vrBoxSize;        /* VR: edge of the visible grab box of a holster / wheel slot, cm, 8..30 (vr_hbox_size) */
+    float vrBoxOpacity;     /* VR: that box's opacity, %, 0..100 (vr_hbox_opacity) */
+    float vrWWheelDist;     /* VR: weapon wheel centre ahead of the right controller, cm, 0..40 (vr_wwheel_dist) */
+    float vrWWheelWidth;    /* VR: weapon wheel oval width, cm, 15..60 (vr_wwheel_width) */
+    float vrWWheelHeight;   /* VR: weapon wheel oval height, cm, 10..50 (vr_wwheel_height) */
     int   vrHeadLock;       /* VR: camera locked to Harry's head, physical head translation ignored (vr_head_lock) */
     float vrGrabRadius;     /* VR: right grip picks up an item this close to the hand, meters, 0.1..1.5 (vr_grab_radius) */
     float vrWheelSize;      /* VR: radial wheel size in %, 100 = 20 deg radius, 50..200 (vr_wheel_size) */

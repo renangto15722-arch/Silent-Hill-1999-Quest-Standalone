@@ -221,6 +221,8 @@ static const int         VAL_CUTVIEW[]  = { 0, 2 };
 static const int         VAL_SNAPTURN[] = { 0, 15, 30, 45, 60, 75, 90 };
 static const int         VAL_SIGHT[]    = { 0, 1, 2 };
 static const char* const LBL_SIGHT[]    = { "Off", "Dot", "Laser" };
+static const int         VAL_WSELECT[]  = { 0, 1 };
+static const char* const LBL_WSELECT[]  = { "Holsters", "Weapon_Wheel" };
 static const int         VAL_HOLSTERW[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
 static const char* const LBL_HOLSTERW[] = { "None", "Kitchen_Knife", "Steel_Pipe", "Rock_Drill", "Hammer",
                                             "Chainsaw", "Katana", "Axe", "Handgun", "Hunting_Rifle",
@@ -608,15 +610,22 @@ static const s_PcOpt PCOPT_VA[] = {
 };
 
 /* Page 12: VR Holsters (vr_ik.c / vr_interact.c): six on the body, a weapon
- * (or the map) each. */
+ * (or the map) each - or, instead of the weapon holsters, the weapon wheel on
+ * the right grip. Each holster / wheel slot shows a box: the hand inside it
+ * takes what it holds, and the weapon is sized to fit in it. */
 static const s_PcOpt PCOPT_VH[] = {
-    { "Holsters",          &g_PcConfig.vrHolsterOn,        "vr_holster",            VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
+    { "Weapon_Select",     &g_PcConfig.vrWeaponSelect,     "vr_weapon_select",      VAL_WSELECT,   2, LBL_WSELECT,   NULL, 1, PCK_INT },
+    { "Box_Size_cm",       NULL, "vr_hbox_size",          NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBoxSize,        NULL, 8.0f, 30.0f, 1.0f },
+    { "Box_Opacity",       NULL, "vr_hbox_opacity",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBoxOpacity,     NULL, 0.0f, 100.0f, 5.0f },
     { "Left_Hip",          &g_PcConfig.vrHolsterSlot[0],   "vr_holster_hip_l",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Right_Hip",         &g_PcConfig.vrHolsterSlot[1],   "vr_holster_hip_r",      VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Left_Chest",        &g_PcConfig.vrHolsterSlot[2],   "vr_holster_chest_l",    VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Right_Chest",       &g_PcConfig.vrHolsterSlot[3],   "vr_holster_chest_r",    VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Behind_Left_Shoulder",  &g_PcConfig.vrHolsterSlot[4], "vr_holster_back_l",   VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
     { "Behind_Right_Shoulder", &g_PcConfig.vrHolsterSlot[5], "vr_holster_back_r",   VAL_HOLSTERW, 13, LBL_HOLSTERW,  NULL, 1, PCK_INT },
+    { "Wheel_Distance_cm", NULL, "vr_wwheel_dist",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelDist,     NULL, 0.0f, 40.0f, 1.0f },
+    { "Wheel_Width_cm",    NULL, "vr_wwheel_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelWidth,    NULL, 15.0f, 60.0f, 1.0f },
+    { "Wheel_Height_cm",   NULL, "vr_wwheel_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelHeight,   NULL, 10.0f, 50.0f, 1.0f },
     /* the last page: no Next */
     { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
     { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
