@@ -30,6 +30,7 @@ s_PcConfig g_PcConfig = {
     .refreshRate    = 0,
     .fpsCap         = 30,
     .weatherSimHz      = 60,   /* per-frame weather sim; 30 = the console's cadence */
+    .snowSize          = 100.0f, /* snow flakes at their original size */
     .cutsceneLineGapMs = 300,
     .darkHarry         = 1,   /* on by default for now */
     .darkHarryAfkSec   = 300, /* five minutes */
@@ -47,6 +48,8 @@ s_PcConfig g_PcConfig = {
     .widescreenMode  = 1, /* 0=pillarbox, 1=Hor+ (default, no bars + correct proportions), 2=stretch */
     .menuPillarbox   = 1, /* 1=pillarbox 2D screens (black bars), 0=stretch to fill */
     .allowLooseFiles = 0, /* 0=disc image only, 1=scan gamedata/load/ first */
+    .hdMaps  = 1, /* loose HD paper maps (gamedata/load/TIM/MP_*, MR_*) */
+    .hdMenus = 1, /* every other loose HD image (menus, title, tips, logos) */
     .residentTextures = 1, /* 1=expanded chunk-texture pool w/ per-slot GL textures (whole map textured), 0=vanilla 8+2 VRAM pool */
     .texturePacks = 1, /* 1=scan gamedata/texturemods/ for DuckStation texture packs (loose dirs or .zip) */
     .texpackCacheMb = 2048, /* composed-canvas cache RAM cap; kills pack re-compose stutter on chunk churn */
@@ -212,15 +215,51 @@ s_PcConfig g_PcConfig = {
     .vrUiScreenSize      = 100.0f, /* 60 deg wide 2D interface panel */
     .vrHeadsetRes        = 100.0f, /* runtime's recommended eye size */
     .vrEyeRes            = 100.0f, /* eye images at the window's resolution */
-    .vrWeaponSize        = 100.0f, /* weapons at the size of the models they replace */
+    .vrWeaponSize        = 140.0f, /* weapons 40% bigger than the models they replace (tuned 17/11/2026) */
     /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
-    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f },
+    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 200.0f, -1.0f },   /* shotgun 200% (tuned 17/11/2026) */
+    /* Default weapon placement in the hand (VR_Objects), tuned on the Quest 3
+     * 17/11/2026. Per row: forward (Z), up (Y), right (X) cm, then pitch (X),
+     * yaw (Y), roll (Z) deg; PcConfig_GripSlot order. A vr_grip_<id> line in
+     * config.cfg overrides its row. */
+    .vrGrip = {
+        {  -7.5f,   2.5f, -3.5f,   0.0f, 65.0f,   0.0f },   /* 128 kitchen knife */
+        { -16.5f,  -6.0f,  0.0f,  50.0f,  0.0f,   0.0f },   /* 129 steel pipe    */
+        {   5.0f,  10.0f, -2.0f,   0.0f,  0.0f,   0.0f },   /* 130 rock drill    */
+        {   0.0f,   0.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 131 (none)        */
+        { -20.0f,  -6.0f, -1.0f,  50.0f,  0.0f,   0.0f },   /* 132 hammer        */
+        {   2.0f,   6.0f, -2.0f,   0.0f,  0.0f,   0.0f },   /* 133 chainsaw      */
+        {   0.0f,   2.5f, -2.5f,   0.0f,  0.0f,   0.0f },   /* 134 katana        */
+        { -10.0f,   2.0f, -1.0f,   0.0f,  0.0f,   0.0f },   /* 135 axe           */
+        {  -3.0f,   5.0f, -1.0f,  20.0f,  0.0f,   5.0f },   /* 160 handgun       */
+        { -13.0f,   5.0f,  0.0f,  30.0f,  0.0f,   0.0f },   /* 161 hunting rifle */
+        { -23.0f,   4.0f, -2.0f,  40.0f,  0.0f,   0.0f },   /* 162 shotgun       */
+        {   4.0f,   2.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 163 hyper blaster */
+    },
+    /* Gun aim, tuned on the Quest 3 17/11/2026: forward, up, right (cm), pitch,
+     * yaw (deg). vr_aim_* applies to every gun, vrGunAim (VR_Objects Aim rows,
+     * values 8-12 of vr_grip_<id>) is each gun's own part on top of it. */
+    .vrAimOfs = { 0.5f, 7.0f, -0.5f, -1.0f, -4.0f },
+    .vrGunAim = {
+        [8]  = {  5.0f,  -6.5f,  2.0f, -20.0f, 4.0f },   /* 160 handgun       */
+        [9]  = { 13.0f,   0.0f, -1.0f, -21.0f, 4.0f },   /* 161 hunting rifle */
+        [10] = { 33.5f, -12.0f,  3.0f, -24.0f, 4.0f },   /* 162 shotgun       */
+        [11] = { 19.0f,  -5.0f,  0.0f,  -6.0f, 3.0f },   /* 163 hyper blaster */
+    },
     .vrGunSight          = 2,      /* laser beam + dot on every gun */
     .vrMapScale          = 150.0f, /* Quest: the paper map 1.5x (45 x 34 cm), readable at the headset's resolution */
     .vrMoveDir           = 0,      /* walk where the body faces */
     .vrHeadLock          = 0,
     .vrHolsterOn         = 1,
     .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
+    .vrWeaponSelect      = 0,      /* holsters */
+    .vrBoxSize           = 16.0f,  /* cm */
+    .vrBoxOpacity        = 30.0f,  /* % */
+    .vrWWheelDist        = 12.0f,  /* cm */
+    .vrWWheelWidth       = 30.0f,  /* cm (1.3 : 1) */
+    .vrWWheelHeight      = 23.0f,  /* cm */
+    .vrHolsterFwd        = 8.0f,   /* cm: Renan, "holsters mais pra frente" */
+    .vrGrabReach         = 6.0f,   /* cm: Renan, more reach, same box (was a fixed 2) */
     .vrCameraHeight      = 0.0f,
     .vrPlayerHeight      = 0.0f,
     .vrGrabRadius        = 0.35f,  /* m */
@@ -660,6 +699,33 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.cutsceneLineGapMs = atoi(value);
         }
+#if defined(__ANDROID__)
+        else if (strcmp(key, "vr_fast_eyes") == 0)
+        {
+            /* Quest: eye passes without the per-batch framebuffer switch
+             * (PsyX_render.cpp FAST EYE PASSES); 0 = the old path */
+            extern int g_PsyX_FastEyes;
+            g_PsyX_FastEyes = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_eye_instancing") == 0)
+        {
+            /* Quest: both eyes in one instanced draw (PsyX_render.cpp EYE INSTANCING) */
+            extern int g_PsyX_EyeInstancing;
+            g_PsyX_EyeInstancing = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "vr_eye_crop") == 0)
+        {
+            /* Quest: shade only what each eye sees (PsyX_render.cpp QUEST EYE CROP) */
+            extern int g_PsyX_EyeCrop;
+            g_PsyX_EyeCrop = (atoi(value) != 0);
+        }
+#endif
+        else if (strcmp(key, "snow_size") == 0)
+        {
+            g_PcConfig.snowSize = (float)atof(value);
+            if (g_PcConfig.snowSize < 10.0f)  g_PcConfig.snowSize = 10.0f;
+            if (g_PcConfig.snowSize > 200.0f) g_PcConfig.snowSize = 200.0f;
+        }
         else if (strcmp(key, "weather_sim_hz") == 0)
         {
             g_PcConfig.weatherSimHz = (atoi(value) == 30) ? 30 : 60;
@@ -732,6 +798,14 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "allow_loose_files") == 0)
         {
             g_PcConfig.allowLooseFiles = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "hd_maps") == 0)
+        {
+            g_PcConfig.hdMaps = (atoi(value) != 0);
+        }
+        else if (strcmp(key, "hd_menus") == 0)
+        {
+            g_PcConfig.hdMenus = (atoi(value) != 0);
         }
         else if (strcmp(key, "global_chara_pool") == 0)
         {
@@ -1323,6 +1397,45 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.vrHolsterOn = (atoi(value) != 0);
         }
+        else if (strcmp(key, "vr_weapon_select") == 0)
+        {
+            g_PcConfig.vrWeaponSelect = (atoi(value) == 1) ? 1 : 0;
+        }
+        else if (strcmp(key, "vr_hbox_size") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrBoxSize = (v < 8.0f) ? 8.0f : (v > 30.0f) ? 30.0f : v;
+        }
+        else if (strcmp(key, "vr_hbox_opacity") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrBoxOpacity = (v < 0.0f) ? 0.0f : (v > 100.0f) ? 100.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_dist") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelDist = (v < 0.0f) ? 0.0f : (v > 40.0f) ? 40.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_width") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelWidth = (v < 15.0f) ? 15.0f : (v > 60.0f) ? 60.0f : v;
+        }
+        else if (strcmp(key, "vr_wwheel_height") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrWWheelHeight = (v < 10.0f) ? 10.0f : (v > 50.0f) ? 50.0f : v;
+        }
+        else if (strcmp(key, "vr_hbox_reach") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrGrabReach = (v < 0.0f) ? 0.0f : (v > 20.0f) ? 20.0f : v;
+        }
+        else if (strcmp(key, "vr_hbox_fwd") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrHolsterFwd = (v < -20.0f) ? -20.0f : (v > 30.0f) ? 30.0f : v;
+        }
         else if (strncmp(key, "vr_holster_", 11) == 0)
         {
             static const char* const names[6] = { "hip_l", "hip_r", "chest_l", "chest_r", "back_l", "back_r" };
@@ -1364,14 +1477,18 @@ void PcConfig_Load(const char* path)
             {
                 /* forward up right (cm), pitch yaw roll (deg), and since the VR
                  * Objects page the model's scale (%) - older lines have six */
-                float sc = -1.0f;
+                /* ... and since 17/11/2026 a gun's own aim (5 more values) */
+                float sc = -1.0f, am[5];
                 int   n;
                 g = g_PcConfig.vrGrip[w];
-                n = sscanf(value, "%f %f %f %f %f %f %f", &g[0], &g[1], &g[2], &g[3], &g[4], &g[5], &sc);
+                n = sscanf(value, "%f %f %f %f %f %f %f %f %f %f %f %f", &g[0], &g[1], &g[2], &g[3], &g[4], &g[5],
+                           &sc, &am[0], &am[1], &am[2], &am[3], &am[4]);
                 if (n < 6)
                     memset(g, 0, sizeof(g_PcConfig.vrGrip[w]));
-                if (n == 7)
+                if (n >= 7)
                     g_PcConfig.vrGripScale[w] = (sc < 50.0f) ? 50.0f : (sc > 200.0f) ? 200.0f : sc;
+                if (n == 12)
+                    memcpy(g_PcConfig.vrGunAim[w], am, sizeof(am));
             }
         }
         else if (strcmp(key, "vr_move_dir") == 0)
@@ -1982,15 +2099,23 @@ void PcConfig_SaveBindLines(const char* const* lines, int count)
 void PcConfig_SaveGrip(int invItemId)
 {
     const int w = PcConfig_GripSlot(invItemId);
-    char      key[24], val[112];
+    char      key[24], val[160];
     const float* g;
+    const float* am;
 
     if (w < 0)
         return;
-    g = g_PcConfig.vrGrip[w];
+    g  = g_PcConfig.vrGrip[w];
+    am = g_PcConfig.vrGunAim[w];
     snprintf(key, sizeof(key), "vr_grip_%d", invItemId);
-    snprintf(val, sizeof(val), "%.1f %.1f %.1f %.1f %.1f %.1f %.0f", (double)g[0], (double)g[1], (double)g[2],
-             (double)g[3], (double)g[4], (double)g[5], (double)g_PcConfig.vrGripScale[w]);
+    if (invItemId >= 160 && invItemId <= 163)   /* guns: + their own aim */
+        snprintf(val, sizeof(val), "%.1f %.1f %.1f %.1f %.1f %.1f %.0f %.1f %.1f %.1f %.1f %.1f",
+                 (double)g[0], (double)g[1], (double)g[2], (double)g[3], (double)g[4], (double)g[5],
+                 (double)g_PcConfig.vrGripScale[w],
+                 (double)am[0], (double)am[1], (double)am[2], (double)am[3], (double)am[4]);
+    else
+        snprintf(val, sizeof(val), "%.1f %.1f %.1f %.1f %.1f %.1f %.0f", (double)g[0], (double)g[1], (double)g[2],
+                 (double)g[3], (double)g[4], (double)g[5], (double)g_PcConfig.vrGripScale[w]);
     PcConfig_SaveKeyValue(key, val);
 }
 

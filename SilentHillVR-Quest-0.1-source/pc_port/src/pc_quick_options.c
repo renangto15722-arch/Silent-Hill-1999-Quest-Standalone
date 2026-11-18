@@ -253,9 +253,14 @@ static const QoRowDef s_pageVrGunAim[] = {
     QO_CLOSE_ROW,
 };
 
-/* The six holsters (vr_ik.c): on/off and the weapon in each. */
+/* The six holsters (vr_ik.c): holsters or the weapon wheel, the grab box, and
+ * the weapon in each. */
 static const QoRowDef s_pageVrHolsters[] = {
-    { ROW_OPT,    "vr_holster",            0, NULL },
+    { ROW_OPT,    "vr_weapon_select",      0, NULL },
+    { ROW_OPT,    "vr_hbox_size",          0, NULL },
+    { ROW_OPT,    "vr_hbox_opacity",       0, NULL },
+    { ROW_OPT,    "vr_hbox_fwd",           0, NULL },
+    { ROW_OPT,    "vr_hbox_reach",         0, NULL },
     QO_HEADER("Hips"),
     { ROW_OPT,    "vr_holster_hip_l",      0, "Left" },
     { ROW_OPT,    "vr_holster_hip_r",      0, "Right" },

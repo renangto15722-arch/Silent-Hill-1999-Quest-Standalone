@@ -195,6 +195,8 @@ static int FlatCapture(void)
 #define VR_FULL_FMV_TAN_Y 0.3375f
 
 #define VR_FULL_CROP_V0 0.0f
+#define VR_EYE_CROP_PAD  0.10f   /* tangent: eye crop margin on every side */
+#define VR_EYE_CROP_ROLL 0.17f   /* rad: eye crop covers this much more head roll */
 #define VR_FULL_CROP_V1 1.0f
 
 /* ---- GL entry points (loaded at runtime) ------------------------------- */
@@ -1300,6 +1302,58 @@ int VrFull_Push(void* sysTbl, void* compTbl, int* parity,
         ComputeCropU(w, h);  /* live viewport crop (v1.2) */
         if (PsyX_GetWorldTangents(t))
             memcpy(s_content, t, sizeof(s_content));
+
+        /* EYE CROP (PsyX_render.cpp PsyX_Stereo_SetEyeCrop, Quest): the part
+         * of the eye image each eye shows - its frustum (s_projExt) in the
+         * image's tangents (s_content), turned by the head roll the compose
+         * counter-rotates by (BuildRolledQuad), +-VR_EYE_CROP_ROLL of roll
+         * and VR_EYE_CROP_PAD of tangent on every side for what changes
+         * until the image is shown. */
+        {
+            extern void  PsyX_Stereo_SetEyeCrop(int eye, float u0, float u1, float v0, float v1);
+            extern float VrTracking_GetHeadRollRad(void);
+            const float roll = VrTracking_GetHeadRollRad();
+            const float cw = s_content[1] - s_content[0], ch = s_content[3] - s_content[2];
+            int e;
+            for (e = 0; e < 2 && cw > 0.0f && ch > 0.0f; e++)
+            {
+                float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+                int   a, k;
+                for (a = -1; a <= 1; a++)
+                {
+                    const float rr = roll + (float)a * VR_EYE_CROP_ROLL;
+                    const float c = cosf(rr), sn = sinf(rr);
+                    for (k = 0; k < 4; k++)
+                    {
+                        const float rx = (k & 1) ? s_projExt[e][1] : s_projExt[e][0];
+                        const float ry = (k & 2) ? s_projExt[e][3] : s_projExt[e][2];
+                        const float tx = rx * c - ry * sn, ty = rx * sn + ry * c;
+                        if (tx < x0) x0 = tx;
+                        if (tx > x1) x1 = tx;
+                        if (ty < y0) y0 = ty;
+                        if (ty > y1) y1 = ty;
+                    }
+                }
+                x0 -= VR_EYE_CROP_PAD; x1 += VR_EYE_CROP_PAD;
+                y0 -= VR_EYE_CROP_PAD; y1 += VR_EYE_CROP_PAD;
+                PsyX_Stereo_SetEyeCrop(e,
+                    s_cropU0 + (x0 - s_content[0]) / cw * (s_cropU1 - s_cropU0),
+                    s_cropU0 + (x1 - s_content[0]) / cw * (s_cropU1 - s_cropU0),
+                    VR_FULL_CROP_V0 + (y0 - s_content[2]) / ch * (VR_FULL_CROP_V1 - VR_FULL_CROP_V0),
+                    VR_FULL_CROP_V0 + (y1 - s_content[2]) / ch * (VR_FULL_CROP_V1 - VR_FULL_CROP_V0));
+                {
+                    static int s_cropLog;
+                    if (s_cropLog < 4)
+                    {
+                        s_cropLog++;
+                        VrOvr_Log("[VR-FULL] eye %d crop u %.3f..%.3f v %.3f..%.3f of its image\n", e,
+                                  (double)(s_cropU0 + (x0 - s_content[0]) / cw * (s_cropU1 - s_cropU0)),
+                                  (double)(s_cropU0 + (x1 - s_content[0]) / cw * (s_cropU1 - s_cropU0)),
+                                  (double)((y0 - s_content[2]) / ch), (double)((y1 - s_content[2]) / ch));
+                    }
+                }
+            }
+        }
 
         /* EYE RESOLUTION (PsyX_render.cpp PsyX_Stereo_SetScale): the factor
          * over the window that gives the eye image the headset's own pixel

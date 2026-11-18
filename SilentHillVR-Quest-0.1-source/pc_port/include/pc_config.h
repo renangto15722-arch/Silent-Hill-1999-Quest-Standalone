@@ -56,6 +56,7 @@ typedef struct {
     int vsync;           /* 0 = off (uncapped), 1 = on, -1 = adaptive */
     int refreshRate;     /* target refresh rate in hz (0 = display default); fullscreen only */
     int fpsCap;          /* gameplay fps cap: 0 = uncapped, 30 = PSX-accurate, 60 = smooth */
+    float snowSize;      /* snow flake size, % of the original look, 10..200 (snow_size; particle.c Pc_SnowFlakeScale) */
     int weatherSimHz;      /* rain/snow simulation rate: 60 (default) steps it once per rendered
                             * frame, 30 locks it to the console's cadence. Only the frame-stepped
                             * parts differ (snow's random walk, spawn/rest counters, the wind
@@ -120,6 +121,8 @@ typedef struct {
     int widescreenMode;  /* 0 = pillarbox (PSX-faithful, default), 1 = Hor+ (extra side content), 2 = stretch */
     int menuPillarbox;   /* 1 = pillarbox 2D screens (menus/load) with 4:3 black bars instead of stretching to fill (config key: menu_pillarbox) */
     int allowLooseFiles; /* 1 = scan gamedata/load/{folder}/{name}.{ext} before CD read (texture mod support) */
+    int hdMaps;          /* 1 = use loose HD paper-map images, TIM/MP_* and TIM/MR_* (hd_maps; fsqueue_3.c Loose_FOpen) */
+    int hdMenus;         /* 1 = use every other loose .png/.dds image: menus, title, tips, logos (hd_menus) */
     int residentTextures; /* 1 = expanded chunk-texture pool: past the 10 vanilla VRAM pages, materials get
                            * virtual slots backed by persistent per-slot GL textures (whole map stays textured,
                            * no page stealing — the flat/rainbow class). 0 = vanilla 8+2 pool + PC keep-4/steal.
@@ -392,10 +395,19 @@ typedef struct {
     float vrMapOfs[6];      /* VR: the paper map in the hand: forward, up, right (cm), pitch, yaw, roll (deg), the sheet's own frame (vr_map_*) */
     float vrGrip[12][6];    /* VR: the saved grip offset of each weapon, PcConfig_GripSlot order (vr_grip_<inventory id>) */
     float vrGripScale[12];  /* VR: each weapon's close-up model scale, %, 50..200 (7th value of vr_grip_<id>; vr_weapon_hd.c) */
+    float vrGunAim[12][5];  /* VR: each gun's own aim, added to vr_aim_*: muzzle forward, up, right (cm), pitch, yaw (deg) (values 8-12 of vr_grip_<id>; vr_ik.c VrIk_GetGunRay) */
     float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..300, default 150 (vr_map_scale; vr_ik.c) */
     int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
     int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
     int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */
+    int   vrWeaponSelect;   /* VR: how weapons are taken: 0 = holsters on the body, 1 = weapon wheel on the right grip (vr_weapon_select) */
+    float vrBoxSize;        /* VR: edge of the visible grab box of a holster / wheel slot, cm, 8..30 (vr_hbox_size) */
+    float vrBoxOpacity;     /* VR: that box's opacity, %, 0..100 (vr_hbox_opacity) */
+    float vrWWheelDist;     /* VR: weapon wheel centre ahead of the right controller, cm, 0..40 (vr_wwheel_dist) */
+    float vrWWheelWidth;    /* VR: weapon wheel oval width, cm, 15..60 (vr_wwheel_width) */
+    float vrWWheelHeight;   /* VR: weapon wheel oval height, cm, 10..50 (vr_wwheel_height) */
+    float vrHolsterFwd;     /* VR: every holster (the map's too) moved forward, cm, -20..30 (vr_hbox_fwd) */
+    float vrGrabReach;      /* VR: a holster takes the hand this far outside its box too, cm, 0..20 (vr_hbox_reach) */
     int   vrHeadLock;       /* VR: camera locked to Harry's head, physical head translation ignored (vr_head_lock) */
     float vrGrabRadius;     /* VR: right grip picks up an item this close to the hand, meters, 0.1..1.5 (vr_grab_radius) */
     float vrWheelSize;      /* VR: radial wheel size in %, 100 = 20 deg radius, 50..200 (vr_wheel_size) */

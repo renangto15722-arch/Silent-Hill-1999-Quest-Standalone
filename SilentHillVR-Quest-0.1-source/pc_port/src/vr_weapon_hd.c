@@ -300,6 +300,10 @@ static void VrWeaponHd_Light(MATRIX* plmWorld, const float rot[3][3], int black)
     SetLightMatrix(&lt);
 }
 
+/* Set by world_draw.c around a weapon drawn in a grab box: the box already
+ * sized it, so the weapon's own Scale is not applied on top. */
+int g_VrWeaponHdNoScale = 0;
+
 /* Draws the close-up model of itemId where its PLM would be drawn from
  * plmCoord (the hand's VR grip, a holster slot, or the hand bone itself when
  * the weapon has no grip offset). 0 = not drawn (not a weapon, not loaded):
@@ -325,7 +329,7 @@ int VrWeaponHd_Draw(int itemId, GsCOORDINATE2* plmCoord, int black)
          * scaled about the PLM's origin - the point the weapon hangs from the
          * hand by - so it grows in the grip */
         const int    slot = PcConfig_GripSlot(itemId);
-        const double k    = ((slot >= 0) ? g_PcConfig.vrGripScale[slot] : 100.0f) / 100.0;
+        const double k    = (g_VrWeaponHdNoScale || slot < 0) ? 1.0 : g_PcConfig.vrGripScale[slot] / 100.0;
         double       em[9], et[3];
         int          i;
         for (i = 0; i < 9; i++)
@@ -528,6 +532,18 @@ void VrWeaponHd_Update(void)
             VrWeaponHd_Load(w);
             return;
         }
+    }
+    {
+        /* the weapon wheel shows every weapon Harry owns */
+        extern int VrInteract_WheelMode(void);
+        extern int Pc_VrOwnsWeapon(u8 id);
+        if (VrInteract_WheelMode())
+            for (w = 0; w < VR_WPN_COUNT; w++)
+                if (Pc_VrOwnsWeapon((u8)s_files[w].itemId) && !s_hd[w].ready && !s_hd[w].failed)
+                {
+                    VrWeaponHd_Load(w);
+                    return;
+                }
     }
 }
 

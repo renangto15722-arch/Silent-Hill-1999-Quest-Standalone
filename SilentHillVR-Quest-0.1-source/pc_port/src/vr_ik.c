@@ -415,6 +415,62 @@ int VrIk_TrackingDirToWorld(const float d[3], float out[3])
     return 1;
 }
 
+static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3]);
+static int LeftWeaponAdjust(float adj[3][3], float ow[3], float pivot[3]);
+
+/* A controller's AIM pose (tracking space). The runtime gives the right
+ * hand's; the left one's is the left GRIP pose times the right hand's
+ * aim-in-grip relation mirrored across the controller's x (S = diag(-1,1,1):
+ * rotation S Rel S, offset S d) - a gun in the left hand then points and
+ * shoots the way the same gun does in the right. The relation is learned
+ * whenever both right poses are there. */
+static int AimPoseOf(int hand, float pos[3], float rot[3][3])
+{
+    static float s_rel[3][3], s_relT[3];
+    static int   s_relOk;
+    float        gp[3], gr[3][3], ap[3], ar[3][3];
+    int          i, j, k;
+
+    if (VrOvr_GetHandPose(1, gp, gr) && VrOvr_GetAimPose(ap, ar))
+    {
+        for (i = 0; i < 3; i++)
+        {
+            for (j = 0; j < 3; j++)
+                s_rel[i][j] = gr[0][i] * ar[0][j] + gr[1][i] * ar[1][j] + gr[2][i] * ar[2][j];
+            s_relT[i] = gr[0][i] * (ap[0] - gp[0]) + gr[1][i] * (ap[1] - gp[1]) + gr[2][i] * (ap[2] - gp[2]);
+        }
+        s_relOk = 1;
+        if (hand == 1)
+        {
+            for (i = 0; i < 3; i++)
+            {
+                pos[i] = ap[i];
+                for (j = 0; j < 3; j++) rot[i][j] = ar[i][j];
+            }
+            return 1;
+        }
+    }
+    else if (hand == 1)
+        return VrOvr_GetAimPose(pos, rot);
+
+    if (!s_relOk || !VrOvr_GetHandPose(0, gp, gr))
+        return 0;
+    for (i = 0; i < 3; i++)
+    {
+        float t = 0.0f;
+        for (j = 0; j < 3; j++)
+        {
+            float v = 0.0f;
+            for (k = 0; k < 3; k++)
+                v += gr[i][k] * s_rel[k][j] * ((k == 0) != (j == 0) ? -1.0f : 1.0f);
+            rot[i][j] = v;
+            t += gr[i][j] * s_relT[j] * (j == 0 ? -1.0f : 1.0f);
+        }
+        pos[i] = gp[i] + t;
+    }
+    return 1;
+}
+
 /* Right controller pointing ray in the world: origin (world Q12) and unit
  * direction (Q12). The bullet ray of player_control.c in VR. */
 int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
@@ -422,28 +478,53 @@ int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd)
     HeadFrame f;
     float     ap[3], ar[3][3], w[3], d[3], dw[3];
 
+    const int hand = VrInteract_WeaponHand();   /* the gun's hand: 1 right, 0 left */
+    const float sx = hand ? 1.0f : -1.0f;      /* the left mirrors right and yaw */
+
     if (!VrTracking_HeadCamActive() || VrTracking_CutsceneActive() ||
-        !g_PcFpsCam || !HeadFrameGet(&f) || !VrOvr_GetAimPose(ap, ar))
+        !g_PcFpsCam || !HeadFrameGet(&f) || !AimPoseOf(hand, ap, ar))
         return 0;
 
     /* the VR Weapon Grip page's Gun Aim rows (vr_aim_*), in the aim pose's own
      * frame (x right, y up, z back): the muzzle point, then the ray turned by
      * pitch (up +) and yaw (right +) off the pointing axis (-Z) */
     {
-        const float* o   = g_PcConfig.vrAimOfs;
+        /* + the equipped gun's own aim (VR_Objects Aim rows, vrGunAim) */
+        const int    slot = PcConfig_GripSlot((int)g_SavegamePtr->equippedWeapon & 0xFF);
+        float        o[5];
         const float  cm  = 0.01f;
-        const float  p   = o[3] * (3.14159265f / 180.0f), y = o[4] * (3.14159265f / 180.0f);
-        const float  kz  = cosf(p) * cosf(y), kx = cosf(p) * sinf(y), ky = sinf(p);
-        int          i;
-        float        m[3];
-        for (i = 0; i < 3; i++)
+        int          k;
+        for (k = 0; k < 5; k++)
+            o[k] = g_PcConfig.vrAimOfs[k] + ((slot >= 0) ? g_PcConfig.vrGunAim[slot][k] : 0.0f);
         {
-            m[i] = ap[i] + ar[i][0] * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
-            d[i] = -ar[i][2] * kz + ar[i][0] * kx + ar[i][1] * ky;
+            const float  p   = o[3] * (3.14159265f / 180.0f), y = o[4] * (3.14159265f / 180.0f);
+            const float  kz  = cosf(p) * cosf(y), kx = sx * cosf(p) * sinf(y), ky = sinf(p);
+            int          i;
+            float        m[3];
+            for (i = 0; i < 3; i++)
+            {
+                m[i] = ap[i] + ar[i][0] * sx * o[2] * cm + ar[i][1] * o[1] * cm - ar[i][2] * o[0] * cm;
+                d[i] = -ar[i][2] * kz + ar[i][0] * kx + ar[i][1] * ky;
+            }
+            PointToWorld(&f, m, w);
         }
-        PointToWorld(&f, m, w);
     }
     DirToWorld(&f, d, dw);
+
+    /* the weapon's own VR_Objects turn/offset: the barrel moved with the
+     * model, so the ray (shot + laser) does too - turned about the hand */
+    {
+        float adj[3][3], ow[3], pv[3], rel[3], v[3];
+        int   i;
+        if (hand ? RightWeaponAdjust(adj, ow, pv) : LeftWeaponAdjust(adj, ow, pv))
+        {
+            for (i = 0; i < 3; i++) rel[i] = w[i] - pv[i];
+            RotVec(adj, rel, v);
+            for (i = 0; i < 3; i++) w[i] = pv[i] + v[i] + ow[i];
+            RotVec(adj, dw, v);
+            for (i = 0; i < 3; i++) dw[i] = v[i];
+        }
+    }
     if (!Normalize(dw)) return 0;
 
     pos->vx = (s32)lrintf(w[0] * 16.0f);
@@ -471,18 +552,8 @@ static void CtrlRotToWorld(const HeadFrame* f, const float r[3][3], float out[3]
     }
 }
 
-static int AimWorldRotation(float out[3][3])
-{
-    HeadFrame f;
-    float     ap[3], ar[3][3];
-
-    if (!HeadFrameGet(&f) || !VrOvr_GetAimPose(ap, ar))
-        return 0;
-    CtrlRotToWorld(&f, ar, out);
-    return 1;
-}
-
-/* Same, for a controller's grip pose (0 = left, 1 = right). */
+/* World rotation of a controller's grip pose (0 = left, 1 = right), axes as
+ * CtrlRotToWorld builds them. */
 static int GripWorldRotation(int hand, float out[3][3])
 {
     HeadFrame f;
@@ -615,88 +686,11 @@ static void HandRefCapture(GsCOORDINATE2* coords)
     }
 }
 
-/* The weapon's grip in the right hand bone's frame, per inventory item:
- * K = Aim^T * Hand, read from the game's aim pose (see the header). */
-#define VR_IK_GRIP_ITEMS  256
-#define VR_IK_GRIP_SETTLE 15     /* frames of steady aiming before reading it */
-static float s_gripK[VR_IK_GRIP_ITEMS][3][3];
-static u8    s_gripKnown[VR_IK_GRIP_ITEMS];
-
-/* The aim direction the animation holds the weapon along: Harry's yaw, and
- * the aim pitch the pose leans to (field_122: 90 deg = level, more = up). */
-static void AnimAimRotation(float out[3][3])
-{
-    const float yaw = BodyYaw();
-    const float pit = (float)(g_SysWork.playerWork.player.properties.player.field_122 - 1024) *
-                      (6.28318531f / 4096.0f);
-    const float fwd[3]   = { sinf(yaw), 0.0f, cosf(yaw) };
-    const float right[3] = { cosf(yaw), 0.0f, -sinf(yaw) };
-    const float cp = cosf(pit), sp = sinf(pit);
-    int i;
-
-    for (i = 0; i < 3; i++)
-    {
-        const float down = (i == 1) ? 1.0f : 0.0f;
-        out[i][0] = right[i];
-        out[i][1] = cp * down + sp * fwd[i];   /* pitch up: the barrel rises (-Y) */
-        out[i][2] = cp * fwd[i] - sp * down;
-    }
-}
-
-/* The aim-pose grip (K, the hand following the aim ray) is a GUN thing. A
- * melee weapon read it too the first time it was raised - after which the
- * hand and the weapon swapped from the grip pose to the aim pose frame, and
- * a VR Weapon Grip offset tuned before no longer sat right, its values the
- * same (the knife). Melee weapons always follow the grip pose. */
-static int IsGunItem(int item)
-{
-    return item >= InvItemId_Handgun && item <= InvItemId_HyperBlaster;
-}
-
-static void GripCapture(GsCOORDINATE2* coords)
-{
-    static int s_aimFrames = 0;
-    const int  item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
-    float      aim[3][3];
-    MATRIX     m;
-    Xf         hand;
-
-    if (!IsGunItem(item) || g_SysWork.playerWork.extra.upperBodyState != PlayerUpperBodyState_Aim)
-    {
-        s_aimFrames = 0;
-        return;
-    }
-    if (s_gripKnown[item] || ++s_aimFrames < VR_IK_GRIP_SETTLE)
-        return;
-
-    Vw_CoordHierarchyMatrixCompute(&coords[HarryBone_RightHand], &m);
-    XfFromMatrix(&m, &hand);
-    if (!IsScaledRotation(hand.r))
-        return;   /* not posed this frame: try the next */
-    Ortho(hand.r, hand.r);
-    AnimAimRotation(aim);
-    RotMulTransA(aim, hand.r, s_gripK[item]);
-    s_gripKnown[item] = 1;
-    VrOvr_Log("[VR-IK] weapon grip read for item %d: K = [%.2f %.2f %.2f | %.2f %.2f %.2f | %.2f %.2f %.2f]\n",
-              item,
-              (double)s_gripK[item][0][0], (double)s_gripK[item][0][1], (double)s_gripK[item][0][2],
-              (double)s_gripK[item][1][0], (double)s_gripK[item][1][1], (double)s_gripK[item][1][2],
-              (double)s_gripK[item][2][0], (double)s_gripK[item][2][1], (double)s_gripK[item][2][2]);
-}
-
-/* World rotation the right hand bone should have this frame, 0 = keep the
- * animation's (no weapon, grip not read yet, no aim pose). */
-static int GunHandRotation(float out[3][3])
-{
-    const int item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
-    float     aim[3][3];
-
-    if (g_SysWork.playerCombat.weaponAttack == NO_VALUE || !IsGunItem(item) || !s_gripKnown[item] ||
-        !AimWorldRotation(aim))
-        return 0;
-    RotMul(aim, s_gripK[item], out);
-    return 1;
-}
+/* Weapons always sit in the controller's GRIP pose. A second frame - the
+ * game's aim animation read once per gun the first time it was aimed
+ * (K = Aim^T * Hand) - swapped every gun to the AIM pose ~40 deg away
+ * after its first aim, so a placement tuned at the draw moved "a few
+ * seconds later" (Renan 17-18/11/2026). Removed: one frame, always. */
 
 /* Rotation by angle t about unit axis a. */
 static void AxisRotation(const float a[3], float t, float out[3][3])
@@ -826,19 +820,230 @@ int VrIk_RootExactOwned(void)
     return s_ikActive;
 }
 
-/* HOLSTERS (see the header): each slot, in meters, in the body frame (x
- * right, y up, z forward), at Harry's own size, and the pitch that turns the
- * relaxed hand: +90 hangs it down, -90 stands it up. vrHolsterSlot order. */
+/* HOLSTERS (see the header): each slot on the PLAYER's real body, as
+ * fractions of the standing height H: up from the floor, right of and ahead
+ * of the SPINE, in the virtual body's frame (VirtualBody below) - and the
+ * pitch that turns the relaxed hand: +90 hangs it down, -90 stands it up.
+ * vrHolsterSlot order. Standard body proportions: eye 0.936 H, shoulder
+ * 0.82 H, chest 0.72 H, hip 0.53 H; the eyes VR_EYE_AHEAD_H ahead of the
+ * spine. At H = 1.66 m (Harry) they land where the old fixed slots were. */
 static const struct { float right, up, fwd, pitch; } s_holsterSlots[6] = {
-    { -0.20f, 0.90f,  0.04f,  90.0f },   /* left hip */
-    {  0.20f, 0.90f,  0.04f,  90.0f },   /* right hip */
-    { -0.12f, 1.28f,  0.12f,  90.0f },   /* left chest */
-    {  0.12f, 1.28f,  0.12f,  90.0f },   /* right chest */
-    { -0.15f, 1.45f, -0.15f, -90.0f },   /* behind the left shoulder */
-    {  0.15f, 1.45f, -0.15f, -90.0f },   /* behind the right shoulder */
+    { -0.120f, 0.550f,  0.024f,  90.0f },   /* left hip */
+    {  0.120f, 0.550f,  0.024f,  90.0f },   /* right hip */
+    { -0.070f, 0.750f,  0.072f,  90.0f },   /* left chest */
+    {  0.070f, 0.750f,  0.072f,  90.0f },   /* right chest */
+    { -0.090f, 0.860f, -0.090f, -90.0f },   /* behind the left shoulder */
+    {  0.090f, 0.860f, -0.090f, -90.0f },   /* behind the right shoulder */
 };
+#define VR_EYE_AHEAD_H 0.055f   /* eyes ahead of the spine, x H */
 
 static int s_ikActive;   /* VrIk_ApplyArms posed the body this frame */
+
+/* The player's standing height, meters, for the torso's proportions: the
+ * highest the headset has been above the floor (the tracking space is the
+ * floor-level STAGE) over the eye-to-height ratio - once that is a standing
+ * eye (>= VR_STAND_EYE_M). Played seated the eye never gets there (1.20 m
+ * read as a 1.29 m person put the chest holster 23 cm under the eyes), so
+ * until then an average adult's VR_SEATED_H_M. Logged when it changes. */
+#define VR_STAND_EYE_M 1.40f
+#define VR_SEATED_H_M  1.70f
+static float s_eyeMax;
+
+static float PlayerHeightM(const HeadFrame* f)
+{
+    static float s_logged = 0.0f;
+    float        h;
+
+    /* measured, never vr_player_height: that key sizes Harry's skeleton, has
+     * no menu row any more, and a stale 190 there put every holster where a
+     * 1.90 m body would have it */
+    if (f->hp[1] > s_eyeMax && f->hp[1] < 2.10f)
+        s_eyeMax = f->hp[1];
+    h = (s_eyeMax >= VR_STAND_EYE_M) ? s_eyeMax / VR_EYE_TO_HEIGHT : VR_SEATED_H_M;
+    if (h > 2.20f) h = 2.20f;
+    if (fabsf(h - s_logged) > 0.02f)
+    {
+        s_logged = h;
+        VrOvr_Log("[VR-IK] holsters for a body %.2f m tall (%s; headset up to %.2f m above the floor)\n",
+                  (double)h, s_eyeMax >= VR_STAND_EYE_M ? "measured standing" : "seated: average adult",
+                  (double)s_eyeMax);
+    }
+    return h;
+}
+
+/* The eye height the holsters hang from (tracking meters): follows the
+ * headset up at once but down only slowly, so bending to reach a holster
+ * does not take the holster down with the head - while sitting down or
+ * standing up still moves the whole body within a few seconds. Updated once
+ * a frame (VirtualBodyUpdate). */
+#define VR_EYE_DOWN_S 4.0f
+static float s_eyeRef;
+static int   s_eyeRefOk;
+
+static void EyeRefUpdate(float eyeY, float dt)
+{
+    if (!s_eyeRefOk || eyeY > s_eyeRef)
+    {
+        s_eyeRef   = eyeY;
+        s_eyeRefOk = 1;
+        return;
+    }
+    s_eyeRef += (eyeY - s_eyeRef) * (1.0f - expf(-dt / VR_EYE_DOWN_S));
+}
+
+/* VIRTUAL BODY (body yaw relative to the head): which way the player's torso
+ * faces, in the tracking space, from the headset AND the controllers - the
+ * holsters ride it, so turning only the head barely moves them. The line
+ * between the two controllers is across the chest (its perpendicular is the
+ * torso's forward), and where the hands are relative to the head says the
+ * same; hands far enough apart weigh up to VR_VB_HANDS_W against the head's
+ * yaw. The torso never turns more than VR_VB_NECK_DEG from the head (turn
+ * the head further and the body comes along), and it eases toward its
+ * target with a VR_VB_EASE_S time constant, so the hands' own motion does
+ * not shake it. Horizontal unit vector, OpenVR axes (x right, z back). */
+#define VR_VB_HANDS_W   0.6f
+#define VR_VB_NECK_DEG  50.0f
+#define VR_VB_EASE_S    0.20f
+static float  s_vbFwd[2];       /* x, z */
+static int    s_vbOk;
+static Uint32 s_vbTicks;
+
+static int Flat2(float* x, float* z)
+{
+    const float l = sqrtf(*x * *x + *z * *z);
+    if (l < 1e-4f) return 0;
+    *x /= l; *z /= l;
+    return 1;
+}
+
+static void VirtualBodyUpdate(void)
+{
+    HeadFrame f;
+    float     hx, hz, tx, tz, w = 0.0f;
+    float     lp[3], rp[3], lr[3][3], rr[3][3];
+    const Uint32 now = SDL_GetTicks();
+    float     dt;
+
+    if (!HeadFrameGet(&f))
+        return;
+    hx = -f.sy;   /* the head's forward: Ry(yaw) * (0, 0, -1) */
+    hz = -f.cy;
+    tx = hx; tz = hz;
+
+    if (VrOvr_GetHandPose(0, lp, lr) && VrOvr_GetHandPose(1, rp, rr))
+    {
+        float ax = rp[0] - lp[0], az = rp[2] - lp[2];   /* left -> right, across the chest */
+        const float sep = sqrtf(ax * ax + az * az);
+        if (sep > 0.15f && Flat2(&ax, &az))
+        {
+            float fx = az, fz = -ax;   /* up x right = forward */
+            float mx = 0.5f * (lp[0] + rp[0]) - f.hp[0], mz = 0.5f * (lp[2] + rp[2]) - f.hp[2];
+            if (Flat2(&mx, &mz) && (mx * fx + mz * fz) > 0.0f)
+            {
+                fx += 0.5f * mx; fz += 0.5f * mz;   /* the hands ahead agree: lean on it */
+                Flat2(&fx, &fz);
+            }
+            if (fx * hx + fz * hz > -0.3f)   /* not crossed / behind the back */
+            {
+                w = VR_VB_HANDS_W * ((sep - 0.15f) / 0.20f);
+                if (w > VR_VB_HANDS_W) w = VR_VB_HANDS_W;
+                tx = hx * (1.0f - w) + fx * w;
+                tz = hz * (1.0f - w) + fz * w;
+                if (!Flat2(&tx, &tz)) { tx = hx; tz = hz; }
+            }
+        }
+    }
+
+    dt = s_vbOk ? (float)(now - s_vbTicks) / 1000.0f : 1.0f;
+    if (dt > 0.25f) dt = 0.25f;
+    s_vbTicks = now;
+    EyeRefUpdate(f.hp[1], dt);
+    if (!s_vbOk)
+    {
+        s_vbFwd[0] = tx; s_vbFwd[1] = tz;
+        s_vbOk = 1;
+    }
+    else
+    {
+        const float k = 1.0f - expf(-dt / VR_VB_EASE_S);
+        float       x = s_vbFwd[0] + (tx - s_vbFwd[0]) * k, z = s_vbFwd[1] + (tz - s_vbFwd[1]) * k;
+        if (Flat2(&x, &z)) { s_vbFwd[0] = x; s_vbFwd[1] = z; }
+    }
+    {
+        /* the neck limit, after the easing: a fast head turn drags the body.
+         * rel = the signed angle from the head's facing to the body's. */
+        const float lim = VR_VB_NECK_DEG * (3.14159265f / 180.0f);
+        const float rel = atan2f(hx * s_vbFwd[1] - hz * s_vbFwd[0], hx * s_vbFwd[0] + hz * s_vbFwd[1]);
+        if (rel > lim || rel < -lim)
+        {
+            const float a = (rel > 0.0f) ? lim : -lim;
+            s_vbFwd[0] = hx * cosf(a) - hz * sinf(a);
+            s_vbFwd[1] = hx * sinf(a) + hz * cosf(a);
+        }
+    }
+}
+
+/* The virtual body's frame in the game world (columns right, down, forward;
+ * PSX axes), flat. Falls back to the game's body yaw without a head pose. */
+static void HolsterFrame(const HeadFrame* f, float out[3][3])
+{
+    float d[3], w[3], fx, fz;
+    if (!f || !s_vbOk)
+    {
+        BodyRotation(out);
+        return;
+    }
+    d[0] = s_vbFwd[0]; d[1] = 0.0f; d[2] = s_vbFwd[1];
+    DirToWorld(f, d, w);
+    fx = w[0]; fz = w[2];
+    if (!Flat2(&fx, &fz))
+    {
+        BodyRotation(out);
+        return;
+    }
+    out[0][0] = fz;   out[0][1] = 0.0f; out[0][2] = fx;
+    out[1][0] = 0.0f; out[1][1] = 1.0f; out[1][2] = 0.0f;
+    out[2][0] = -fx;  out[2][1] = 0.0f; out[2][2] = fz;
+}
+
+/* A slot's spot in the world (Q8, exact): from the eyes straight down the
+ * WORLD's vertical (not the camera's: its walk sway turned that 70 cm drop
+ * and swung the holsters at every step) by the torso's proportion under the
+ * eyes (EyeRefUpdate), back along the head's facing to the spine, then out along the
+ * virtual body's right and forward - real meters at the hands' scale
+ * (ReachScale), so the hand and the holster agree. 0 = no head pose. */
+static int SlotWorldT(int slot, double t[3])
+{
+    HeadFrame f;
+    float     body[3][3], hf[3], hw[3], H, drop, back;
+    const float rs = ReachScale();
+    int       i;
+
+    if (!HeadFrameGet(&f))
+        return 0;
+    H = PlayerHeightM(&f);
+    HolsterFrame(&f, body);
+    {
+        /* the head's facing in the world, flat */
+        float fx, fz;
+        hf[0] = -f.sy; hf[1] = 0.0f; hf[2] = -f.cy;
+        DirToWorld(&f, hf, hw);
+        fx = hw[0]; fz = hw[2];
+        if (!Flat2(&fx, &fz)) { fx = body[0][2]; fz = body[2][2]; }
+        hw[0] = fx; hw[1] = 0.0f; hw[2] = fz;
+    }
+    /* under the eyes by the torso's proportion (eye 0.936 H), from the
+     * slow eye reference - standing or seated alike; world y is down */
+    drop = (f.hp[1] - (s_eyeRefOk ? s_eyeRef : f.hp[1]) +
+            (VR_EYE_TO_HEIGHT - s_holsterSlots[slot].up) * H) * rs;
+    back = VR_EYE_AHEAD_H * H * rs;
+    for (i = 0; i < 3; i++)
+        t[i] = (double)f.cam.t[i] + (double)((i == 1 ? drop : 0.0f) - hw[i] * back +
+                                             (body[i][0] * s_holsterSlots[slot].right * H +
+                                              body[i][2] * (s_holsterSlots[slot].fwd * H +
+                                                            g_PcConfig.vrHolsterFwd * 0.01f)) * rs);   /* + Holster_Forward */
+    return 1;
+}
 
 /* Harry owns this weapon (pc_combat.c, the inventory). */
 static int OwnsWeapon(int itemId)
@@ -853,12 +1058,13 @@ int VrIk_WeaponOwned(int itemId)
     return itemId != 0 && OwnsWeapon(itemId);
 }
 
-/* The weapon in a slot (inventory id), 0 = none: holsters off, nothing
- * picked, not owned, or the same weapon already in an earlier slot. */
+/* The weapon in a slot (inventory id), 0 = none: the weapon wheel is used
+ * instead of the holsters, nothing picked, not owned, or the same weapon
+ * already in an earlier slot. */
 int VrIk_HolsterSlotItem(int slot)
 {
     int id, k;
-    if (!g_PcConfig.vrHolsterOn || slot < 0 || slot >= 6)
+    if (g_PcConfig.vrWeaponSelect != 0 || slot < 0 || slot >= 6)
         return 0;
     id = PcConfig_HolsterWeapon(g_PcConfig.vrHolsterSlot[slot]);
     if (!id || !OwnsWeapon(id))
@@ -877,53 +1083,91 @@ int VrIk_HolsterSlotOf(int itemId)
     return -1;
 }
 
-/* A slot's world matrix (rotation Q12, translation world Q8). 0 while the IK
- * body is not running or the relaxed hand is not read yet. */
-int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
+/* GRAB BOXES (vr_holster_box.c, world_draw.c, vr_interact.c). The body's
+ * frame (columns right, down, forward), the size the hands and what they hold
+ * are drawn at (1 / World_Scale), and a holster slot's pose without any scale:
+ * rot = the weapon's turn in it, t = its spot (world Q8, exact). */
+void VrIk_BodyFrame(float out[3][3])
 {
-    const GsCOORDINATE2* root = &g_SysWork.playerBoneCoords[HarryBone_Root];
-    float body[3][3], local[3], ofs[3], px[3][3], r[3][3];
-    const float u = VR_IK_UNITS_PER_M;
-    float a;
-    int   i, j;
+    HeadFrame f;
+    HolsterFrame(HeadFrameGet(&f) ? &f : NULL, out);
+}
 
-    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1])
-        return 0;
-    a = s_holsterSlots[slot].pitch * (3.14159265f / 180.0f);
-    BodyRotation(body);
+float VrIk_HandScale(void)
+{
+    return HandScale();
+}
 
-    /* PSX axes: y is down */
-    local[0] = s_holsterSlots[slot].right * u * s_bodyScaleApplied;
-    local[1] = -s_holsterSlots[slot].up * u * s_bodyScaleApplied;
-    local[2] = s_holsterSlots[slot].fwd * u * s_bodyScaleApplied;
-    RotVec(body, local, ofs);
-
-    /* about the body's right axis, then into the world */
+/* The pitch turn about the frame's right axis, then the relaxed hand (K):
+ * how a weapon hangs in a holster - and in a weapon wheel slot. */
+static void SlotItemRotation(const float frame[3][3], float pitchDeg, float out[3][3])
+{
+    const float a = pitchDeg * (3.14159265f / 180.0f);
+    float       px[3][3], r[3][3];
     px[0][0] = 1.0f; px[0][1] = 0.0f;     px[0][2] = 0.0f;
     px[1][0] = 0.0f; px[1][1] = cosf(a);  px[1][2] = -sinf(a);
     px[2][0] = 0.0f; px[2][1] = sinf(a);  px[2][2] = cosf(a);
     RotMul(px, s_handK[1], r);
-    RotMul(body, r, r);
+    RotMul(frame, r, out);
+}
+
+int VrIk_HolsterSlotPose(int slot, float rot[3][3], double t[3])
+{
+    float body[3][3];
+
+    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, t))
+        return 0;
+    VrIk_BodyFrame(body);
+    SlotItemRotation(body, s_holsterSlots[slot].pitch, rot);
+    return 1;
+}
+
+/* A slot's world matrix (rotation Q12, translation world Q8). 0 while the IK
+ * body is not running, the relaxed hand is not read yet or there is no head
+ * pose. The slot sits on the player's real body (SlotWorldT). */
+int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
+{
+    float  body[3][3], r[3][3];
+    double et[3];
+    int    i, j;
+
+    if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, et))
+        return 0;
+    VrIk_BodyFrame(body);
+    SlotItemRotation(body, s_holsterSlots[slot].pitch, r);
 
     for (i = 0; i < 3; i++)
     {
         for (j = 0; j < 3; j++)
-            out->m[i][j] = (s16)lrintf(r[i][j] * HandScale() * s_bodyScaleApplied * 4096.0f);
-        out->t[i] = root->coord.t[i] + (s32)lrintf(ofs[i]);
+            out->m[i][j] = (s16)lrintf(r[i][j] * HandScale() * 4096.0f);
+        out->t[i] = (s32)lrint(et[i]);
     }
     {
         /* its float source for PGXP (vw_calc.c Vw_PcExactLocalSet): the slot
          * rides the body without whole-unit steps */
         extern void Vw_PcExactLocalSet(const MATRIX* rounded, const double m[9], const double t[3]);
-        double em[9], et[3];
+        double em[9];
         for (i = 0; i < 3; i++)
-        {
             for (j = 0; j < 3; j++)
-                em[i * 3 + j] = (double)r[i][j] * HandScale() * s_bodyScaleApplied;
-            et[i] = s_rootExactT[i] + ofs[i];   /* the root's exact spot (RootExactRegister) */
-        }
+                em[i * 3 + j] = (double)r[i][j] * HandScale();
         Vw_PcExactLocalSet(out, em, et);
     }
+    return 1;
+}
+
+/* A weapon in a weapon wheel slot hangs like one in a chest holster, in the
+ * wheel's own frame, turned a quarter about the vertical so its side - not
+ * its edge - faces the player. 0 while the relaxed hand is not read yet. */
+int VrIk_WheelItemRotation(const float frame[3][3], float out[3][3])
+{
+    float turned[3][3], ry[3][3];
+    if (!s_ikActive || !s_handKnown[1])
+        return 0;
+    ry[0][0] = 0.0f;  ry[0][1] = 0.0f; ry[0][2] = 1.0f;
+    ry[1][0] = 0.0f;  ry[1][1] = 1.0f; ry[1][2] = 0.0f;
+    ry[2][0] = -1.0f; ry[2][1] = 0.0f; ry[2][2] = 0.0f;
+    RotMul(frame, ry, turned);
+    SlotItemRotation(turned, 90.0f, out);
     return 1;
 }
 
@@ -948,12 +1192,12 @@ int VrIk_HolsterSlotWorld(int slot, VECTOR3* out)
 #define VR_MAP_FOLDED      0.40f    /* folded in the holster: this much of the sheet */
 #define VR_MAP_FOLDED_TILT 60.0f    /* deg from upright: the holstered map lies back, its face up, to be seen looking down */
 
-/* The holster slot holding the map, -1 for none (holsters off, or no slot set to Map). */
+/* The holster slot holding the map, -1 for none (no slot set to Map). The map
+ * keeps its holster with the weapon wheel too: the wheel only replaces the
+ * weapon holsters. */
 int VrIk_MapHolsterSlot(void)
 {
     int k;
-    if (!g_PcConfig.vrHolsterOn)
-        return -1;
     for (k = 0; k < 6; k++)
         if (g_PcConfig.vrHolsterSlot[k] == PCCFG_HOLSTER_MAP) return k;
     return -1;
@@ -1156,7 +1400,11 @@ static void HeldItemOut(int hand, const float r[3][3], const float ow[3], MATRIX
 
 /* The knife in the LEFT hand: on the left virtual hand, with the VR Weapon
  * Grip offset mirrored (right and yaw/roll flip sides). */
-static int LeftHeldItemMatrix(MATRIX* out)
+/* The left-hand weapon's grip turn and offset in the world - the right
+ * hand's VR_Objects placement mirrored (yaw, roll and the right offset
+ * negated): the weapon is the left virtual hand turned by adj about the hand
+ * (s_vhT[0]) and moved by ow. Shared by the model and the gun ray. */
+static int LeftWeaponAdjust(float adj[3][3], float ow[3], float pivot[3])
 {
     const int    item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
     const int    w    = PcConfig_GripSlot(item);
@@ -1165,12 +1413,11 @@ static int LeftHeldItemMatrix(MATRIX* out)
     static const float zero[6] = { 0 };
     static const float ax[3] = { 1.0f, 0.0f, 0.0f }, ay[3] = { 0.0f, 1.0f, 0.0f }, az[3] = { 0.0f, 0.0f, 1.0f };
     const float* a = (w >= 0) ? g_PcConfig.vrGrip[w] : zero;
-    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], adj[3][3], r[3][3], o[3], ow[3];
+    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], o[3];
     int    i, j;
 
     if (!s_ikActive || !s_vhOk[0] || !GripWorldRotation(0, c))
         return 0;
-
     for (i = 0; i < 3; i++)
         for (j = 0; j < 3; j++) ct[i][j] = c[j][i];
     AxisRotation(ay, -a[4] * d2r, ry);
@@ -1180,14 +1427,60 @@ static int LeftHeldItemMatrix(MATRIX* out)
     RotMul(rc, rz, rc);
     RotMul(c, rc, adj);
     RotMul(adj, ct, adj);
-    RotMul(adj, s_vhR[0], r);
-
     o[0] = -a[2] * cm;
     o[1] = -a[1] * cm;
     o[2] = a[0] * cm;
     RotVec(c, o, ow);
+    if (pivot)
+        for (i = 0; i < 3; i++) pivot[i] = s_vhT[0][i];
+    return 1;
+}
 
-    (void)i; (void)j;
+static int LeftHeldItemMatrix(MATRIX* out)
+{
+    float c[3][3], adj[3][3], r[3][3], ow[3];
+    int   i, j;
+
+    if (!LeftWeaponAdjust(adj, ow, NULL) || !GripWorldRotation(0, c))
+        return 0;
+    {
+        /* The base the weapon sits on: the RIGHT hand's (its relaxed-hand K)
+         * mirrored across the controller's own x (S K S, S = diag(-1, 1, 1)),
+         * at the left virtual hand's size. The left hand's own K is not the
+         * right's mirror image, so a weapon tuned in the right hand sat wrong
+         * in the left; now it is that same placement, mirrored. */
+        float q[3][3], km[3][3], base[3][3];
+        const float sc = Ortho(s_vhR[0], q);
+        if (s_handKnown[1])
+        {
+            for (i = 0; i < 3; i++)
+                for (j = 0; j < 3; j++)
+                    km[i][j] = s_handK[1][i][j] * ((i == 0) != (j == 0) ? -1.0f : 1.0f) * sc;
+            RotMul(c, km, base);
+            RotMul(adj, base, r);
+        }
+        else
+        {
+            RotMul(adj, s_vhR[0], r);   /* right hand not read yet: the left's own */
+        }
+    }
+    {
+        /* A rotation cannot mirror a shape: it flips the weapon about its own
+         * x as well, and a mesh not centred on its x (the handgun -2..9) then
+         * sits to the side of where the right hand's mirror image would be.
+         * Move it back by twice its middle along that axis - at its drawn
+         * size: the close-up model carries the weapon's own Scale. */
+        extern int Pc_VrWeaponMidX(int itemId, float* midX);
+        const int item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
+        const int w    = PcConfig_GripSlot(item);
+        float     mx;
+        if (s_handKnown[1] && Pc_VrWeaponMidX(item, &mx))
+        {
+            const float k = (w >= 0 ? g_PcConfig.vrGripScale[w] : 100.0f) / 100.0f;
+            for (i = 0; i < 3; i++)
+                ow[i] += r[i][0] * (-2.0f * k * mx);
+        }
+    }
     HeldItemOut(0, r, ow, out);
     return 1;
 }
@@ -1195,7 +1488,12 @@ static int LeftHeldItemMatrix(MATRIX* out)
 /* The equipped weapon's model matrix in the hand, with its grip offset
  * (world_draw.c WorldGfx_HeldItemDraw). 0 = no VR hands this frame: the game
  * draws it on Harry's hand bone (cutscenes, flat play). */
-int VrIk_HeldItemMatrix(MATRIX* out)
+/* The right-hand weapon's grip turn and offset in the world (VR_Objects
+ * position/rotation of the equipped weapon): the weapon is the virtual hand
+ * turned by adj about the hand (s_vhT[1]) and moved by ow. Shared by the
+ * model (VrIk_HeldItemMatrix) and the gun ray (VrIk_GetGunRay), so the shot
+ * and the laser leave the barrel wherever the weapon was placed. */
+static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3])
 {
     const int    item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
     const int    w    = PcConfig_GripSlot(item);
@@ -1204,20 +1502,15 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     const float  d2r  = 3.14159265f / 180.0f;
     const float  cm   = ReachScale() / 100.0f;
     static const float ax[3] = { 1.0f, 0.0f, 0.0f }, ay[3] = { 0.0f, 1.0f, 0.0f }, az[3] = { 0.0f, 0.0f, 1.0f };
-    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], adj[3][3], r[3][3], o[3], ow[3];
+    float c[3][3], ct[3][3], rx[3][3], ry[3][3], rz[3][3], rc[3][3], o[3];
     int    i, j;
 
-    if (VrInteract_WeaponHand() == 0)
-        return LeftHeldItemMatrix(out);
     if (!s_ikActive || !s_vhOk[1])
         return 0;
     a = (w >= 0) ? g_PcConfig.vrGrip[w] : zero;
 
-    /* the controller frame the hand follows: the aim pose with a gun, the
-     * grip pose with anything else */
-    if (!(g_SysWork.playerCombat.weaponAttack != NO_VALUE && IsGunItem(item) && s_gripKnown[item] &&
-          AimWorldRotation(c)) &&
-        !GripWorldRotation(1, c))
+    /* the controller frame the hand follows: the grip pose */
+    if (!GripWorldRotation(1, c))
         return 0;
     for (i = 0; i < 3; i++)
         for (j = 0; j < 3; j++) ct[i][j] = c[j][i];
@@ -1230,7 +1523,6 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     RotMul(rc, rz, rc);
     RotMul(c, rc, adj);
     RotMul(adj, ct, adj);             /* C R C^T: the turn in the world */
-    RotMul(adj, s_vhR[1], r);
 
     /* the controller frame as CtrlRotToWorld builds it: x right, y down,
      * z forward (PSX axes) */
@@ -1238,7 +1530,20 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     o[1] = -a[1] * cm;
     o[2] = a[0] * cm;
     RotVec(c, o, ow);
+    if (pivot)
+        for (i = 0; i < 3; i++) pivot[i] = s_vhT[1][i];
+    return 1;
+}
 
+int VrIk_HeldItemMatrix(MATRIX* out)
+{
+    float adj[3][3], r[3][3], ow[3];
+
+    if (VrInteract_WeaponHand() == 0)
+        return LeftHeldItemMatrix(out);
+    if (!RightWeaponAdjust(adj, ow, NULL))
+        return 0;
+    RotMul(adj, s_vhR[1], r);
     HeldItemOut(1, r, ow, out);
     return 1;
 }
@@ -1246,8 +1551,8 @@ int VrIk_HeldItemMatrix(MATRIX* out)
 /* Player_Update tail (player_control.c). */
 void VrIk_ApplyArms(GsCOORDINATE2* coords)
 {
-    float tl[3], tr[3], gun[3][3], hw[2][3][3], sc;
-    int   haveL = 0, haveR = 0, haveGun, haveHand[2], b, h;
+    float tl[3], tr[3], hw[2][3][3], sc;
+    int   haveL = 0, haveR = 0, haveHand[2], b, h;
 
     if (coords != g_SysWork.playerBoneCoords)
         return;
@@ -1301,10 +1606,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
         coords[b].flg = 0;
 
     /* the animation's references, before anything here moves the body */
-    GripCapture(coords);
     HandRefCapture(coords);
-    /* a knife in the LEFT hand (vr_interact.c): the right hand is empty */
-    haveGun = haveR && VrInteract_WeaponHand() == 1 && GunHandRotation(gun);
 
     /* each hand: the controller's rotation times the fixed offset K */
     for (h = 0; h < 2; h++)
@@ -1315,6 +1617,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
     }
 
     ReadHarryHeight(coords);
+    VirtualBodyUpdate();
     KeepNeckUnderView(coords);
     RootExactRegister(coords);
     s_ikActive = 1;
@@ -1375,8 +1678,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
         const float* t   = h ? tr : tl;
         const int    has = h ? haveR : haveL;
         float        g[3][3];
-        const float (*rot)[3] = (h == 1 && haveGun) ? (const float (*)[3])gun :
-                                haveHand[h]           ? (const float (*)[3])hw[h] : NULL;
+        const float (*rot)[3] = haveHand[h] ? (const float (*)[3])hw[h] : NULL;
         int i, j;
         if (!has) continue;
         if (rot == NULL)

@@ -18,8 +18,9 @@
 
  Either grip, one owner per press, decided at the press (GripPress):
    H. HOLSTER - the hand is within VR_HOLSTER_RADIUS_M of one of the six
-               holsters (vr_ik.c) holding a weapon Harry owns - the left
-               hand only finds the knife (VR_LEFT_WEAPON): at the equipped
+               holsters (vr_ik.c) holding a weapon Harry owns - either
+               hand takes any weapon (a gun in the left hand aims and
+               fires from the left controller, vr_ik.c): at the equipped
                weapon's own holster the press holsters it or draws it into
                this hand (drawn in the other hand, this hand takes it); at
                another's it equips that weapon, in this hand. Holstered,
@@ -104,7 +105,7 @@ extern int  g_PcFpsCam;
 #define VR_RELOAD_WAIT_MS 1500u   /* raised gun waiting for the reload to start */
 #define VR_RELOAD_MAX_MS  4000u   /* ... and at most this long in all */
 
-enum { GRIP_IDLE = 0, GRIP_GRAB, GRIP_MAP, GRIP_SPENT };
+enum { GRIP_IDLE = 0, GRIP_GRAB, GRIP_MAP, GRIP_SPENT, GRIP_WHEEL };
 
 static int s_gripDown, s_gripArmed, s_gripOwner = GRIP_IDLE;
 static int s_lgripDown, s_lgripArmed, s_lgripOwner = GRIP_IDLE;
@@ -257,21 +258,23 @@ int Pc_VrPickupHeld(void)
 }
 
 /* HOLSTER (see the header) */
-#define VR_HOLSTER_RADIUS_M 0.18f
 static int s_holstered;        /* the equipped weapon is in the holster */
 static u8  s_holsterWeapon;    /* ...this one (another equipped = drawn) */
-static int s_leftWeapon;       /* the equipped knife is in the LEFT hand */
-
-/* The only weapon the left hand takes. Every other one is drawn and fired
- * with the right hand. */
-#define VR_LEFT_WEAPON InvItemId_KitchenKnife
+static int s_leftWeapon;       /* the equipped weapon is in the LEFT hand */
+static u8  s_leftItem;         /* ...this one (another equipped = right hand) */
 
 /* The hand the equipped weapon is in: 0 = left, 1 = right (world_draw.c, vr_ik.c). */
 int VrInteract_WeaponHand(void)
 {
-    if (s_leftWeapon && g_SavegamePtr->equippedWeapon != VR_LEFT_WEAPON)
-        s_leftWeapon = 0;   /* another weapon was equipped: it is in the right hand */
+    if (s_leftWeapon && g_SavegamePtr->equippedWeapon != s_leftItem)
+        s_leftWeapon = 0;   /* another weapon was equipped (wheel, inventory): it is in the right hand */
     return s_leftWeapon ? 0 : 1;
+}
+
+static void SetWeaponHand(int handIdx, u8 id)
+{
+    s_leftWeapon = (handIdx == 0);
+    s_leftItem   = id;
 }
 
 static int HolsterWeapon(void)
@@ -292,9 +295,40 @@ int VrInteract_HolsterState(void)
     return s_holstered;
 }
 
-/* The weapon in the holster a hand is at (game meters), 0 for none. The left
- * hand only finds VR_LEFT_WEAPON. Logged per grip press, so a miss in the
- * headset log says how far off the hand was. */
+/* GRAB BOXES (vr_holster_box.c draws them): a holster takes the hand that is
+ * inside its box - Box_Size (vr_hbox_size) at the hands' size, plus a little
+ * margin - in the body's frame. How far in, as the larger of the three axes
+ * over the half edge: <= 1 = inside, 0 = at the centre. */
+extern void  VrIk_BodyFrame(float out[3][3]);
+extern float VrIk_HandScale(void);
+
+static float BoxHalfM(void)
+{
+    /* the box, plus Grab_Reach around it (the box itself keeps its size) */
+    return (g_PcConfig.vrBoxSize * 0.005f + g_PcConfig.vrGrabReach * 0.01f) * VrIk_HandScale();
+}
+
+static float HandInBox(const VECTOR3* hand, const VECTOR3* centre)
+{
+    float body[3][3], d[3], m = 0.0f;
+    const float half = BoxHalfM();
+    int   j;
+
+    VrIk_BodyFrame(body);
+    d[0] = (float)(hand->vx - centre->vx) / 4096.0f;
+    d[1] = (float)(hand->vy - centre->vy) / 4096.0f;
+    d[2] = (float)(hand->vz - centre->vz) / 4096.0f;
+    for (j = 0; j < 3; j++)
+    {
+        const float a = fabsf(body[0][j] * d[0] + body[1][j] * d[1] + body[2][j] * d[2]) / half;
+        if (a > m) m = a;
+    }
+    return m;
+}
+
+/* The weapon in the holster box a hand is in, 0 for none; outDist = how far
+ * in (HandInBox). Logged per grip
+ * press, so a miss in the headset log says how far off the hand was. */
 static u8 HandAtHolster(int handIdx, float* outDist)
 {
     VECTOR3 hand, hol;
@@ -308,21 +342,36 @@ static u8 HandAtHolster(int handIdx, float* outDist)
     for (k = 0; k < 6; k++)
     {
         const int id = VrIk_HolsterSlotItem(k);
-        float     dx, dy, dz, d;
-        if (!id || (handIdx == 0 && id != VR_LEFT_WEAPON) || !VrIk_HolsterSlotWorld(k, &hol))
+        float     d;
+        if (!id || !VrIk_HolsterSlotWorld(k, &hol))
             continue;
-        dx = (float)(hand.vx - hol.vx) / 4096.0f;
-        dy = (float)(hand.vy - hol.vy) / 4096.0f;
-        dz = (float)(hand.vz - hol.vz) / 4096.0f;
-        d  = sqrtf(dx * dx + dy * dy + dz * dz);
+        d = HandInBox(&hand, &hol);
         if (d < best) { best = d; bestId = (u8)id; }
     }
     if (!bestId)
         return 0;
-    VrOvr_Log("[VR-HANDS] grip: %s hand %.2f m from the holster of weapon %d (reach %.2f)\n",
-              handIdx ? "right" : "left", (double)best, (int)bestId, (double)VR_HOLSTER_RADIUS_M);
+    VrOvr_Log("[VR-HANDS] grip: %s hand at %.2f of the box of weapon %d (inside <= 1)\n",
+              handIdx ? "right" : "left", (double)best, (int)bestId);
     *outDist = best;
-    return best <= VR_HOLSTER_RADIUS_M ? bestId : 0;
+    return best <= 1.0f ? bestId : 0;
+}
+
+/* The hand (either) is in holster slot k's box: the box lights up
+ * (world_draw.c). */
+int VrInteract_HandInSlotBox(int slot)
+{
+    extern int VrIk_MapHolsterSlot(void);
+    VECTOR3 hol, hand;
+    int     h;
+
+    if (!VrIk_HolsterSlotWorld(slot, &hol))
+        return 0;
+    for (h = 0; h < 2; h++)
+    {
+        if (VrIk_GetHandWorld(h, &hand) && HandInBox(&hand, &hol) <= 1.0f)
+            return 1;
+    }
+    return 0;
 }
 
 /* PAPER MAP: it sits in the holster slot set to Map (vr_ik.c
@@ -339,11 +388,9 @@ static float HandToMapHolster(int handIdx)
 
     if (!Pc_MinimapVrMapReady() || !VrIk_GetHandWorld(handIdx, &hand) || !VrIk_MapHolsterWorld(&hol))
         return 1e9f;
-    dx = (float)(hand.vx - hol.vx) / 4096.0f;
-    dy = (float)(hand.vy - hol.vy) / 4096.0f;
-    dz = (float)(hand.vz - hol.vz) / 4096.0f;
-    d  = sqrtf(dx * dx + dy * dy + dz * dz);
-    VrOvr_Log("[VR-HANDS] grip: %s hand %.2f m from the map holster\n", handIdx ? "right" : "left", (double)d);
+    (void)dx; (void)dy; (void)dz;
+    d = HandInBox(&hand, &hol);
+    VrOvr_Log("[VR-HANDS] grip: %s hand at %.2f of the map holster box (inside <= 1)\n", handIdx ? "right" : "left", (double)d);
     return d;
 }
 
@@ -424,7 +471,7 @@ static int GripPress(int handIdx)
         /* the map's holster: an empty hand takes it, the hand holding it puts it back */
         const float mapD = (s_mapHand < 0 || s_mapHand == handIdx) ? HandToMapHolster(handIdx) : 1e9f;
 
-        if (mapD <= VR_HOLSTER_RADIUS_M && (!at || mapD < weaponDist))
+        if (mapD <= 1.0f && (!at || mapD < weaponDist))
         {
             if (s_mapHand == handIdx)
                 MapPutBack();
@@ -437,14 +484,14 @@ static int GripPress(int handIdx)
             if (!s_holstered && VrInteract_WeaponHand() != handIdx)
             {
                 /* drawn, in the other hand: this hand takes it */
-                s_leftWeapon = (handIdx == 0);
+                SetWeaponHand(handIdx, at);
                 if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d to the %s hand\n", (int)at, side);
                 return GRIP_SPENT;
             }
             s_holstered     = !s_holstered;
             s_holsterWeapon = at;
-            s_leftWeapon    = (handIdx == 0);
+            SetWeaponHand(handIdx, at);
             if (!s_holstered && s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
             VrOvr_Log("[VR-HANDS] holster: weapon %d %s (%s hand)\n", (int)at,
                       s_holstered ? "holstered" : "drawn", side);
@@ -456,7 +503,7 @@ static int GripPress(int handIdx)
             if (Pc_VrWheelUse(at))
             {
                 s_holstered  = 0;
-                s_leftWeapon = (handIdx == 0);
+                SetWeaponHand(handIdx, at);
                 if (s_mapHand == handIdx) MapPutBack();   /* one thing per hand */
                 VrOvr_Log("[VR-HANDS] holster: weapon %d drawn (equipped, %s hand)\n", (int)at, side);
             }
@@ -476,6 +523,220 @@ static int GripPress(int handIdx)
         }
     }
     return GRIP_IDLE;
+}
+
+/* ---- WEAPON WHEEL (Weapon_Select = Weapon_Wheel, instead of the weapon
+ * holsters) --------------------------------------------------------------
+ * Held right grip that nothing else took (no map holster, no pickup in
+ * reach): an oval of the weapons Harry owns - only those, evenly around it,
+ * slot 0 at the top, clockwise, in the inventory's weapon order - opens
+ * Wheel_Distance ahead of the right controller, upright, facing the way the
+ * body faces. It stays where it opened (it rides with Harry if he walks) and
+ * never reorders while open. The right hand goes to a weapon: its box lights
+ * up (an enlarged hit area, and the slot it is in keeps it until another is
+ * clearly nearer, so a neighbour does not take over). Releasing the grip
+ * takes the lit weapon into the right hand; nothing lit = nothing changes.
+ * Sizes are real cm at the hands' size (1 / World_Scale). */
+#define VR_WW_MAX       11
+#define VR_WW_HIT_M     0.03f    /* hit area beyond the box, in the wheel's plane */
+#define VR_WW_DEPTH_M   0.08f    /* ... and in front of / behind it */
+#define VR_WW_STICKY_M  0.015f   /* another slot must be this much nearer to take over */
+
+typedef struct
+{
+    int     open;
+    int     n;
+    u8      ids[VR_WW_MAX];
+    int     sel;                 /* -1 = none lit */
+    VECTOR3 ofs;                 /* centre - Harry's position when it opened (world Q12) */
+    float   frame[3][3];         /* columns: right, down, forward (world) */
+    float   slot[VR_WW_MAX][2];  /* each slot: right, down from the centre (m) */
+    float   half;                /* half a slot box (m) */
+    float   gap;                 /* centre to centre of neighbouring slots (m) */
+} VrWeaponWheel;
+
+static VrWeaponWheel s_ww;
+
+static void WWheelCentre(VECTOR3* out)
+{
+    out->vx = g_SysWork.playerWork.player.position.vx + s_ww.ofs.vx;
+    out->vy = g_SysWork.playerWork.player.position.vy + s_ww.ofs.vy;
+    out->vz = g_SysWork.playerWork.player.position.vz + s_ww.ofs.vz;
+}
+
+static int WWheelOpen(void)
+{
+    extern int Pc_VrOwnsWeapon(u8 id);
+    const float hs = VrIk_HandScale();
+    VECTOR3     hand;
+    float       minGap = 1e9f, halfCm;
+    int         i;
+
+    memset(&s_ww, 0, sizeof(s_ww));
+    for (i = 1; i <= 11 && s_ww.n < VR_WW_MAX; i++)
+    {
+        const int id = PcConfig_HolsterWeapon(i);
+        if (id && Pc_VrOwnsWeapon((u8)id))
+            s_ww.ids[s_ww.n++] = (u8)id;
+    }
+    if (s_ww.n <= 0 || !VrIk_GetHandWorld(1, &hand))
+    {
+        VrOvr_Log("[VR-HANDS] weapon wheel: nothing to show (%d weapons)\n", s_ww.n);
+        return 0;
+    }
+
+    VrIk_BodyFrame(s_ww.frame);
+    {
+        const float d = g_PcConfig.vrWWheelDist * 0.01f * hs * 4096.0f;
+        s_ww.ofs.vx = hand.vx + (s32)lrintf(s_ww.frame[0][2] * d) - g_SysWork.playerWork.player.position.vx;
+        s_ww.ofs.vy = hand.vy + (s32)lrintf(s_ww.frame[1][2] * d) - g_SysWork.playerWork.player.position.vy;
+        s_ww.ofs.vz = hand.vz + (s32)lrintf(s_ww.frame[2][2] * d) - g_SysWork.playerWork.player.position.vz;
+    }
+    for (i = 0; i < s_ww.n; i++)
+    {
+        const float a = 6.28318531f * (float)i / (float)s_ww.n;
+        s_ww.slot[i][0] = 0.5f * g_PcConfig.vrWWheelWidth * 0.01f * hs * sinf(a);
+        s_ww.slot[i][1] = -0.5f * g_PcConfig.vrWWheelHeight * 0.01f * hs * cosf(a);
+    }
+    /* the boxes never overlap: at most 90% of the nearest neighbour's gap */
+    for (i = 0; i < s_ww.n && s_ww.n > 1; i++)
+    {
+        const int   j  = (i + 1) % s_ww.n;
+        const float dx = s_ww.slot[i][0] - s_ww.slot[j][0], dy = s_ww.slot[i][1] - s_ww.slot[j][1];
+        const float g  = sqrtf(dx * dx + dy * dy);
+        if (g < minGap) minGap = g;
+    }
+    s_ww.gap  = (s_ww.n > 1) ? minGap : 0.5f * g_PcConfig.vrWWheelWidth * 0.01f * hs;
+    halfCm    = g_PcConfig.vrBoxSize * 0.5f;
+    s_ww.half = halfCm * 0.01f * hs;
+    if (s_ww.n > 1 && s_ww.half > 0.45f * minGap)
+        s_ww.half = 0.45f * minGap;
+    s_ww.sel  = -1;
+    s_ww.open = 1;
+    VrOvr_Log("[VR-HANDS] weapon wheel: open, %d weapons, box %.1f cm\n", s_ww.n, (double)(s_ww.half * 200.0f / hs));
+    return 1;
+}
+
+/* The hand picks the NEAREST slot (in the wheel's plane) within a generous
+ * reach - not only inside its small box - and the pick STAYS lit when the
+ * hand drifts off (as it does while the grip opens): only another slot
+ * taking over, or the hand back at the wheel's centre (cancel), changes it.
+ * A neighbour takes over only once clearly nearer (VR_WW_STICKY_M). */
+static void WWheelTrack(void)
+{
+    VECTOR3 hand, c;
+    float   d[3], p[3], best = 1e9f, cur = 1e9f;
+    int     i, j, bestI = -1;
+
+    if (!VrIk_GetHandWorld(1, &hand))
+        return;
+    WWheelCentre(&c);
+    d[0] = (float)(hand.vx - c.vx) / 4096.0f;
+    d[1] = (float)(hand.vy - c.vy) / 4096.0f;
+    d[2] = (float)(hand.vz - c.vz) / 4096.0f;
+    for (j = 0; j < 3; j++)
+        p[j] = s_ww.frame[0][j] * d[0] + s_ww.frame[1][j] * d[1] + s_ww.frame[2][j] * d[2];
+
+    {
+        const float hs     = VrIk_HandScale();
+        const float reach  = (s_ww.half + VR_WW_HIT_M * hs > 0.75f * s_ww.gap) ? s_ww.half + VR_WW_HIT_M * hs
+                                                                               : 0.75f * s_ww.gap;
+        const float depth  = 0.15f * hs;
+        const float rx     = 0.5f * g_PcConfig.vrWWheelWidth * 0.01f * hs;
+        const float ry     = 0.5f * g_PcConfig.vrWWheelHeight * 0.01f * hs;
+        /* the centre: inside 40% of the oval = back to "nothing" */
+        const float e      = (p[0] * p[0]) / (rx * rx) + (p[1] * p[1]) / (ry * ry);
+
+        if (fabsf(p[2]) <= depth && s_ww.n > 1 && e < 0.40f * 0.40f)
+        {
+            bestI = -1;
+        }
+        else
+        {
+            for (i = 0; i < s_ww.n; i++)
+            {
+                const float dx = p[0] - s_ww.slot[i][0], dy = p[1] - s_ww.slot[i][1];
+                const float q  = sqrtf(dx * dx + dy * dy);
+                if (i == s_ww.sel) cur = q;
+                if (q < best) { best = q; bestI = i; }
+            }
+            if (bestI >= 0 && (best > reach || fabsf(p[2]) > depth))
+                bestI = s_ww.sel;   /* drifted off: the pick stays */
+            else if (s_ww.sel >= 0 && bestI != s_ww.sel && best > cur - VR_WW_STICKY_M * hs)
+                bestI = s_ww.sel;   /* a neighbour must be clearly nearer */
+        }
+    }
+    if (bestI != s_ww.sel)
+    {
+        s_ww.sel = bestI;
+        if (bestI >= 0)
+            VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d lit\n", (int)s_ww.ids[bestI]);
+        else
+            VrOvr_Log("[VR-HANDS] weapon wheel: back at the centre, nothing lit\n");
+    }
+}
+
+/* apply = the grip was released: the lit weapon into the right hand. */
+static void WWheelClose(int apply)
+{
+    if (!s_ww.open) return;
+    if (apply && s_ww.sel >= 0)
+    {
+        const u8 id = s_ww.ids[s_ww.sel];
+        if (id == g_SavegamePtr->equippedWeapon)
+        {
+            s_leftWeapon = 0;
+            VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d already in hand\n", (int)id);
+        }
+        else if (Pc_VrWheelUse(id))
+        {
+            s_holstered  = 0;
+            s_leftWeapon = 0;
+            if (s_mapHand == 1) MapPutBack();   /* one thing per hand */
+            VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d drawn (right hand)\n", (int)id);
+        }
+        else
+        {
+            VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d could not be equipped now\n", (int)id);
+        }
+    }
+    else
+    {
+        VrOvr_Log("[VR-HANDS] weapon wheel: closed (%s)\n", apply ? "released, nothing lit" : "cancelled");
+    }
+    s_ww.open = 0;
+    s_ww.sel  = -1;
+}
+
+/* For the drawing (world_draw.c): the wheel's centre (world Q12) and frame,
+ * each slot's weapon and centre (world Q12), the half box (m), the lit slot. */
+int VrInteract_WeaponWheel(VECTOR3* centre, float frame[3][3], u8* ids, VECTOR3* slots, float* half, int* sel)
+{
+    VECTOR3 c;
+    int     i, j;
+
+    if (!s_ww.open)
+        return 0;
+    WWheelCentre(&c);
+    *centre = c;
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 3; j++) frame[i][j] = s_ww.frame[i][j];
+    for (i = 0; i < s_ww.n; i++)
+    {
+        ids[i] = s_ww.ids[i];
+        slots[i].vx = c.vx + (s32)lrintf((s_ww.frame[0][0] * s_ww.slot[i][0] + s_ww.frame[0][1] * s_ww.slot[i][1]) * 4096.0f);
+        slots[i].vy = c.vy + (s32)lrintf((s_ww.frame[1][0] * s_ww.slot[i][0] + s_ww.frame[1][1] * s_ww.slot[i][1]) * 4096.0f);
+        slots[i].vz = c.vz + (s32)lrintf((s_ww.frame[2][0] * s_ww.slot[i][0] + s_ww.frame[2][1] * s_ww.slot[i][1]) * 4096.0f);
+    }
+    *half = s_ww.half;
+    *sel  = s_ww.sel;
+    return s_ww.n;
+}
+
+/* The weapons the wheel can show (owned), for loading their models ahead. */
+int VrInteract_WheelMode(void)
+{
+    return g_PcConfig.vrWeaponSelect == 1;
 }
 
 static void VrInteract_ProcessHands(VrPadState* st);
@@ -582,19 +843,28 @@ static void VrInteract_ProcessHands(VrPadState* st)
         s_yPulse--;
     }
 
-    /* ---- right grip: holster (weapon or map) > grab, decided per press ---- */
+    /* ---- right grip: holster (weapon or map) > grab > weapon wheel, decided
+     * per press ---- */
     if (!full)
     {
         if (s_gripOwner != GRIP_IDLE)
             s_gripOwner = GRIP_SPENT;   /* the rest of this press is dead */
+        WWheelClose(0);                 /* cancelled: nothing changes */
     }
     else if (gripNow && !s_gripDown)
     {
         s_gripOwner = s_gripArmed ? GripPress(1) : GRIP_SPENT;
+        if (s_gripOwner == GRIP_IDLE && g_PcConfig.vrWeaponSelect == 1 && WWheelOpen())
+            s_gripOwner = GRIP_WHEEL;
     }
+    if (s_ww.open && full && gripNow)
+        WWheelTrack();
 
     if (!gripNow && s_gripDown)
+    {
+        WWheelClose(1);
         s_gripOwner = GRIP_IDLE;        /* the map stays in the hand: the holster puts it back */
+    }
     if (full)
         st->rgrip = 0.0f;               /* the game never sees it in gameplay */
     s_gripArmed = full ? (s_gripArmed || !gripNow) : 0;
