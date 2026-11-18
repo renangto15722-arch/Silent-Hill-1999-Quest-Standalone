@@ -517,6 +517,10 @@ int VrTracking_UiInWorld(void)
 
         case GameState_InventoryScreen:
         case GameState_PaperMapScreen:
+        /* the scripted map scene (a new objective: zoom on the paper map,
+         * arrow, "Cheryl") - a map screen like the one the player opens; it
+         * was taken for a title-side screen and blown up */
+        case GameState_MapEvent:
         case GameState_SaveScreen:
         case GameState_OptionScreen:
         case GameState_LoadStatusScreen:
