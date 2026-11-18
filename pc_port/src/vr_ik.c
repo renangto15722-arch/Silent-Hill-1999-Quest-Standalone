@@ -766,25 +766,26 @@ int VrIk_RootExactOwned(void)
 
 /* HOLSTERS (see the header): each slot on the PLAYER's real body, as
  * fractions of the standing height H: up from the floor, right of and ahead
- * of the eyes (the headset), in the body's frame - and the pitch that turns
- * the relaxed hand: +90 hangs it down, -90 stands it up. vrHolsterSlot order.
- * Standard body proportions: eye 0.936 H, shoulder 0.82 H, chest 0.72 H,
- * hip 0.53 H; the eyes ~0.055 H ahead of the spine. At H = 1.66 m (Harry)
- * they land where the old fixed slots were. */
+ * of the SPINE, in the virtual body's frame (VirtualBody below) - and the
+ * pitch that turns the relaxed hand: +90 hangs it down, -90 stands it up.
+ * vrHolsterSlot order. Standard body proportions: eye 0.936 H, shoulder
+ * 0.82 H, chest 0.72 H, hip 0.53 H; the eyes VR_EYE_AHEAD_H ahead of the
+ * spine. At H = 1.66 m (Harry) they land where the old fixed slots were. */
 static const struct { float right, up, fwd, pitch; } s_holsterSlots[6] = {
-    { -0.120f, 0.550f, -0.030f,  90.0f },   /* left hip */
-    {  0.120f, 0.550f, -0.030f,  90.0f },   /* right hip */
-    { -0.070f, 0.750f,  0.017f,  90.0f },   /* left chest */
-    {  0.070f, 0.750f,  0.017f,  90.0f },   /* right chest */
-    { -0.090f, 0.860f, -0.145f, -90.0f },   /* behind the left shoulder */
-    {  0.090f, 0.860f, -0.145f, -90.0f },   /* behind the right shoulder */
+    { -0.120f, 0.550f,  0.024f,  90.0f },   /* left hip */
+    {  0.120f, 0.550f,  0.024f,  90.0f },   /* right hip */
+    { -0.070f, 0.750f,  0.072f,  90.0f },   /* left chest */
+    {  0.070f, 0.750f,  0.072f,  90.0f },   /* right chest */
+    { -0.090f, 0.860f, -0.090f, -90.0f },   /* behind the left shoulder */
+    {  0.090f, 0.860f, -0.090f, -90.0f },   /* behind the right shoulder */
 };
+#define VR_EYE_AHEAD_H 0.055f   /* eyes ahead of the spine, x H */
 
 static int s_ikActive;   /* VrIk_ApplyArms posed the body this frame */
 
-/* The player's standing height, meters: the
- * highest the headset has been above the floor (the tracking space is the
- * floor-level STAGE) over the eye-to-height ratio. Logged when it changes. */
+/* The player's standing height, meters: the highest the headset has been
+ * above the floor (the tracking space is the floor-level STAGE) over the
+ * eye-to-height ratio. Logged when it changes. */
 static float PlayerHeightM(const HeadFrame* f)
 {
     static float s_eyeMax = 0.0f, s_logged = 0.0f;
@@ -807,28 +808,152 @@ static float PlayerHeightM(const HeadFrame* f)
     return h;
 }
 
-/* A slot's spot in the world (Q8, exact): straight below the headset at the
- * slot's height above the real floor, then out along the body's right and
- * forward - real meters at the hands' scale (ReachScale), so the hand and
- * the holster agree wherever Harry's own skeleton is. 0 = no head pose. */
+/* VIRTUAL BODY (body yaw relative to the head): which way the player's torso
+ * faces, in the tracking space, from the headset AND the controllers - the
+ * holsters ride it, so turning only the head barely moves them. The line
+ * between the two controllers is across the chest (its perpendicular is the
+ * torso's forward), and where the hands are relative to the head says the
+ * same; hands far enough apart weigh up to VR_VB_HANDS_W against the head's
+ * yaw. The torso never turns more than VR_VB_NECK_DEG from the head (turn
+ * the head further and the body comes along), and it eases toward its
+ * target with a VR_VB_EASE_S time constant, so the hands' own motion does
+ * not shake it. Horizontal unit vector, OpenVR axes (x right, z back). */
+#define VR_VB_HANDS_W   0.6f
+#define VR_VB_NECK_DEG  50.0f
+#define VR_VB_EASE_S    0.20f
+static float  s_vbFwd[2];       /* x, z */
+static int    s_vbOk;
+static Uint32 s_vbTicks;
+
+static int Flat2(float* x, float* z)
+{
+    const float l = sqrtf(*x * *x + *z * *z);
+    if (l < 1e-4f) return 0;
+    *x /= l; *z /= l;
+    return 1;
+}
+
+static void VirtualBodyUpdate(void)
+{
+    HeadFrame f;
+    float     hx, hz, tx, tz, w = 0.0f;
+    float     lp[3], rp[3], lr[3][3], rr[3][3];
+    const Uint32 now = SDL_GetTicks();
+    float     dt;
+
+    if (!HeadFrameGet(&f))
+        return;
+    hx = -f.sy;   /* the head's forward: Ry(yaw) * (0, 0, -1) */
+    hz = -f.cy;
+    tx = hx; tz = hz;
+
+    if (VrOvr_GetHandPose(0, lp, lr) && VrOvr_GetHandPose(1, rp, rr))
+    {
+        float ax = rp[0] - lp[0], az = rp[2] - lp[2];   /* left -> right, across the chest */
+        const float sep = sqrtf(ax * ax + az * az);
+        if (sep > 0.15f && Flat2(&ax, &az))
+        {
+            float fx = az, fz = -ax;   /* up x right = forward */
+            float mx = 0.5f * (lp[0] + rp[0]) - f.hp[0], mz = 0.5f * (lp[2] + rp[2]) - f.hp[2];
+            if (Flat2(&mx, &mz) && (mx * fx + mz * fz) > 0.0f)
+            {
+                fx += 0.5f * mx; fz += 0.5f * mz;   /* the hands ahead agree: lean on it */
+                Flat2(&fx, &fz);
+            }
+            if (fx * hx + fz * hz > -0.3f)   /* not crossed / behind the back */
+            {
+                w = VR_VB_HANDS_W * ((sep - 0.15f) / 0.20f);
+                if (w > VR_VB_HANDS_W) w = VR_VB_HANDS_W;
+                tx = hx * (1.0f - w) + fx * w;
+                tz = hz * (1.0f - w) + fz * w;
+                if (!Flat2(&tx, &tz)) { tx = hx; tz = hz; }
+            }
+        }
+    }
+
+    dt = s_vbOk ? (float)(now - s_vbTicks) / 1000.0f : 1.0f;
+    if (dt > 0.25f) dt = 0.25f;
+    s_vbTicks = now;
+    if (!s_vbOk)
+    {
+        s_vbFwd[0] = tx; s_vbFwd[1] = tz;
+        s_vbOk = 1;
+    }
+    else
+    {
+        const float k = 1.0f - expf(-dt / VR_VB_EASE_S);
+        float       x = s_vbFwd[0] + (tx - s_vbFwd[0]) * k, z = s_vbFwd[1] + (tz - s_vbFwd[1]) * k;
+        if (Flat2(&x, &z)) { s_vbFwd[0] = x; s_vbFwd[1] = z; }
+    }
+    {
+        /* the neck limit, after the easing: a fast head turn drags the body.
+         * rel = the signed angle from the head's facing to the body's. */
+        const float lim = VR_VB_NECK_DEG * (3.14159265f / 180.0f);
+        const float rel = atan2f(hx * s_vbFwd[1] - hz * s_vbFwd[0], hx * s_vbFwd[0] + hz * s_vbFwd[1]);
+        if (rel > lim || rel < -lim)
+        {
+            const float a = (rel > 0.0f) ? lim : -lim;
+            s_vbFwd[0] = hx * cosf(a) - hz * sinf(a);
+            s_vbFwd[1] = hx * sinf(a) + hz * cosf(a);
+        }
+    }
+}
+
+/* The virtual body's frame in the game world (columns right, down, forward;
+ * PSX axes), flat. Falls back to the game's body yaw without a head pose. */
+static void HolsterFrame(const HeadFrame* f, float out[3][3])
+{
+    float d[3], w[3], fx, fz;
+    if (!f || !s_vbOk)
+    {
+        BodyRotation(out);
+        return;
+    }
+    d[0] = s_vbFwd[0]; d[1] = 0.0f; d[2] = s_vbFwd[1];
+    DirToWorld(f, d, w);
+    fx = w[0]; fz = w[2];
+    if (!Flat2(&fx, &fz))
+    {
+        BodyRotation(out);
+        return;
+    }
+    out[0][0] = fz;   out[0][1] = 0.0f; out[0][2] = fx;
+    out[1][0] = 0.0f; out[1][1] = 1.0f; out[1][2] = 0.0f;
+    out[2][0] = -fx;  out[2][1] = 0.0f; out[2][2] = fz;
+}
+
+/* A slot's spot in the world (Q8, exact): from the eyes straight down the
+ * WORLD's vertical (not the camera's: its walk sway turned that 70 cm drop
+ * and swung the holsters at every step) to the slot's height above the real
+ * floor, back along the head's facing to the spine, then out along the
+ * virtual body's right and forward - real meters at the hands' scale
+ * (ReachScale), so the hand and the holster agree. 0 = no head pose. */
 static int SlotWorldT(int slot, double t[3])
 {
     HeadFrame f;
-    float     body[3][3], below[3], w[3], H;
+    float     body[3][3], hf[3], hw[3], H, drop, back;
     const float rs = ReachScale();
     int       i;
 
     if (!HeadFrameGet(&f))
         return 0;
     H = PlayerHeightM(&f);
-    below[0] = f.hp[0];
-    below[1] = s_holsterSlots[slot].up * H;   /* tracking space: y up, floor at 0 */
-    below[2] = f.hp[2];
-    PointToWorld(&f, below, w);
-    BodyRotation(body);
+    HolsterFrame(&f, body);
+    {
+        /* the head's facing in the world, flat */
+        float fx, fz;
+        hf[0] = -f.sy; hf[1] = 0.0f; hf[2] = -f.cy;
+        DirToWorld(&f, hf, hw);
+        fx = hw[0]; fz = hw[2];
+        if (!Flat2(&fx, &fz)) { fx = body[0][2]; fz = body[2][2]; }
+        hw[0] = fx; hw[1] = 0.0f; hw[2] = fz;
+    }
+    drop = (f.hp[1] - s_holsterSlots[slot].up * H) * rs;   /* world y is down */
+    back = VR_EYE_AHEAD_H * H * rs;
     for (i = 0; i < 3; i++)
-        t[i] = (double)w[i] + (double)(body[i][0] * s_holsterSlots[slot].right * H +
-                                       body[i][2] * s_holsterSlots[slot].fwd * H) * rs;
+        t[i] = (double)f.cam.t[i] + (double)((i == 1 ? drop : 0.0f) - hw[i] * back +
+                                             (body[i][0] * s_holsterSlots[slot].right * H +
+                                              body[i][2] * s_holsterSlots[slot].fwd * H) * rs);
     return 1;
 }
 
@@ -876,7 +1001,8 @@ int VrIk_HolsterSlotOf(int itemId)
  * rot = the weapon's turn in it, t = its spot (world Q8, exact). */
 void VrIk_BodyFrame(float out[3][3])
 {
-    BodyRotation(out);
+    HeadFrame f;
+    HolsterFrame(HeadFrameGet(&f) ? &f : NULL, out);
 }
 
 float VrIk_HandScale(void)
@@ -903,7 +1029,7 @@ int VrIk_HolsterSlotPose(int slot, float rot[3][3], double t[3])
 
     if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, t))
         return 0;
-    BodyRotation(body);
+    VrIk_BodyFrame(body);
     SlotItemRotation(body, s_holsterSlots[slot].pitch, rot);
     return 1;
 }
@@ -919,7 +1045,7 @@ int VrIk_HolsterSlotMatrix(int slot, MATRIX* out)
 
     if (slot < 0 || slot >= 6 || !s_ikActive || !s_handKnown[1] || !SlotWorldT(slot, et))
         return 0;
-    BodyRotation(body);
+    VrIk_BodyFrame(body);
     SlotItemRotation(body, s_holsterSlots[slot].pitch, r);
 
     for (i = 0; i < 3; i++)
@@ -1354,6 +1480,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
     }
 
     ReadHarryHeight(coords);
+    VirtualBodyUpdate();
     KeepNeckUnderView(coords);
     RootExactRegister(coords);
     s_ikActive = 1;
