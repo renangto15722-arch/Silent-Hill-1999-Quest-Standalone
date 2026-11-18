@@ -691,6 +691,15 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.cutsceneLineGapMs = atoi(value);
         }
+#if defined(__ANDROID__)
+        else if (strcmp(key, "vr_fast_eyes") == 0)
+        {
+            /* Quest: eye passes without the per-batch framebuffer switch
+             * (PsyX_render.cpp FAST EYE PASSES); 0 = the old path */
+            extern int g_PsyX_FastEyes;
+            g_PsyX_FastEyes = (atoi(value) != 0);
+        }
+#endif
         else if (strcmp(key, "snow_size") == 0)
         {
             g_PcConfig.snowSize = (float)atof(value);
