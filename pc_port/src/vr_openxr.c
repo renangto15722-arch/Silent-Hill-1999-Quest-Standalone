@@ -652,10 +652,82 @@ static void EndFrameIfOpen(void)
     s_eyeSubmitted[0] = s_eyeSubmitted[1] = 0;
 }
 
+#if defined(__ANDROID__)
+/* GPU TIME (Quest perf log): a GL_EXT_disjoint_timer_query time-elapsed
+ * query around each frame's GL work (frame begin -> next frame's wait).
+ * Results are collected a few frames later, never waited for. */
+#ifndef GL_TIME_ELAPSED_EXT
+#define GL_TIME_ELAPSED_EXT 0x88BF
+#endif
+#ifndef GL_GPU_DISJOINT_EXT
+#define GL_GPU_DISJOINT_EXT 0x8FBB
+#endif
+#define GPU_Q_COUNT 6
+static GLuint s_gpuQ[GPU_Q_COUNT];
+static int    s_gpuQBusy[GPU_Q_COUNT];
+static int    s_gpuQOpen = -1, s_gpuQOk = -1, s_gpuN = 0;
+static double s_gpuMs = 0.0;
+
+static void GpuTimerEnd(void)
+{
+    int i;
+    if (s_gpuQOk != 1) return;
+    if (s_gpuQOpen >= 0)
+    {
+        glEndQuery(GL_TIME_ELAPSED_EXT);
+        s_gpuQBusy[s_gpuQOpen] = 1;
+        s_gpuQOpen = -1;
+    }
+    for (i = 0; i < GPU_Q_COUNT; i++)
+    {
+        GLuint avail = 0, ns = 0;
+        GLint  disjoint = 0;
+        if (!s_gpuQBusy[i]) continue;
+        glGetQueryObjectuiv(s_gpuQ[i], GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (!avail) continue;
+        glGetQueryObjectuiv(s_gpuQ[i], GL_QUERY_RESULT, &ns);
+        glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+        if (!disjoint) { s_gpuMs += (double)ns / 1e6; s_gpuN++; }
+        s_gpuQBusy[i] = 0;
+    }
+}
+
+static void GpuTimerBegin(void)
+{
+    int i;
+    if (s_gpuQOk < 0)
+    {
+        GLint n = 0;
+        s_gpuQOk = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+        for (i = 0; i < n; i++)
+        {
+            const char* e = (const char*)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+            if (e && strcmp(e, "GL_EXT_disjoint_timer_query") == 0) { s_gpuQOk = 1; break; }
+        }
+        if (s_gpuQOk) glGenQueries(GPU_Q_COUNT, s_gpuQ);
+        VrOvr_Log("[VR-XR] GPU timer queries: %s\n", s_gpuQOk ? "on" : "not supported");
+    }
+    if (s_gpuQOk != 1 || s_gpuQOpen >= 0) return;
+    for (i = 0; i < GPU_Q_COUNT; i++)
+    {
+        if (!s_gpuQBusy[i])
+        {
+            glBeginQuery(GL_TIME_ELAPSED_EXT, s_gpuQ[i]);
+            s_gpuQOpen = i;
+            return;
+        }
+    }
+}
+#endif
+
 static void BeginNextFrame(void)
 {
     PollEvents();
     if (!s_running || s_lost) return;
+#if defined(__ANDROID__)
+    GpuTimerEnd();
+#endif
 
     {
         static Uint64 s_workStart = 0;   /* when the previous frame began */
@@ -671,6 +743,9 @@ static void BeginNextFrame(void)
         t2 = SDL_GetPerformanceCounter();
         if (XR_FAILED(p_xrBeginFrame(s_session, &bi))) return;
         s_frameOpen = 1;
+#if defined(__ANDROID__)
+        GpuTimerBegin();
+#endif
 
         /* frame rate vs the headset's every 5 s, split into the game's own
          * work (frame begin -> next wait) and time blocked in xrWaitFrame.
@@ -744,6 +819,21 @@ static void BeginNextFrame(void)
                           n * 1000.0 / (double)(now - t0),
                           s_fs.predictedDisplayPeriod > 0 ? 1e9 / (double)s_fs.predictedDisplayPeriod : 0.0,
                           s_workMs / n, hookMs > 0.0 ? hookMs : 0.0, s_waitMs / n, PsyX_Stereo_TakeDrawCount() / n, PsyX_Stereo_TakeCpuMs() / n);
+#if defined(__ANDROID__)
+                {
+                    /* where the game's time goes: the draw lists (CPU parse +
+                     * GL submit), the VR hook, the rest (game logic etc.), and
+                     * the GPU's own time for the frame */
+                    extern double PsyX_Perf_TakeOtMs(void);
+                    const double ot   = PsyX_Perf_TakeOtMs() / n;
+                    const double hk   = hookMs > 0.0 ? hookMs : 0.0;
+                    const double rest = s_workMs / n - ot - hk;
+                    VrOvr_Log("[VR-SPLIT] CPU: draw lists %.1f ms, VR hook %.1f ms, game logic + rest %.1f ms | GPU %.1f ms per frame (%d measured)\n",
+                              ot, hk, rest > 0.0 ? rest : 0.0, s_gpuN ? s_gpuMs / s_gpuN : 0.0, s_gpuN);
+                    s_gpuMs = 0.0;
+                    s_gpuN  = 0;
+                }
+#endif
                 t0 = now;
                 n  = 0;
                 s_workMs = s_waitMs = 0.0;
