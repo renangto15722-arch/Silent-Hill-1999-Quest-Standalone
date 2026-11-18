@@ -551,6 +551,7 @@ typedef struct
     float   frame[3][3];         /* columns: right, down, forward (world) */
     float   slot[VR_WW_MAX][2];  /* each slot: right, down from the centre (m) */
     float   half;                /* half a slot box (m) */
+    float   gap;                 /* centre to centre of neighbouring slots (m) */
 } VrWeaponWheel;
 
 static VrWeaponWheel s_ww;
@@ -604,6 +605,7 @@ static int WWheelOpen(void)
         const float g  = sqrtf(dx * dx + dy * dy);
         if (g < minGap) minGap = g;
     }
+    s_ww.gap  = (s_ww.n > 1) ? minGap : 0.5f * g_PcConfig.vrWWheelWidth * 0.01f * hs;
     halfCm    = g_PcConfig.vrBoxSize * 0.5f;
     s_ww.half = halfCm * 0.01f * hs;
     if (s_ww.n > 1 && s_ww.half > 0.45f * minGap)
@@ -614,6 +616,11 @@ static int WWheelOpen(void)
     return 1;
 }
 
+/* The hand picks the NEAREST slot (in the wheel's plane) within a generous
+ * reach - not only inside its small box - and the pick STAYS lit when the
+ * hand drifts off (as it does while the grip opens): only another slot
+ * taking over, or the hand back at the wheel's centre (cancel), changes it.
+ * A neighbour takes over only once clearly nearer (VR_WW_STICKY_M). */
 static void WWheelTrack(void)
 {
     VECTOR3 hand, c;
@@ -630,27 +637,41 @@ static void WWheelTrack(void)
         p[j] = s_ww.frame[0][j] * d[0] + s_ww.frame[1][j] * d[1] + s_ww.frame[2][j] * d[2];
 
     {
-        const float hs    = VrIk_HandScale();
-        const float reach = s_ww.half + VR_WW_HIT_M * hs;
-        const float depth = s_ww.half + VR_WW_DEPTH_M * hs;
-        for (i = 0; i < s_ww.n; i++)
+        const float hs     = VrIk_HandScale();
+        const float reach  = (s_ww.half + VR_WW_HIT_M * hs > 0.75f * s_ww.gap) ? s_ww.half + VR_WW_HIT_M * hs
+                                                                               : 0.75f * s_ww.gap;
+        const float depth  = 0.15f * hs;
+        const float rx     = 0.5f * g_PcConfig.vrWWheelWidth * 0.01f * hs;
+        const float ry     = 0.5f * g_PcConfig.vrWWheelHeight * 0.01f * hs;
+        /* the centre: inside 40% of the oval = back to "nothing" */
+        const float e      = (p[0] * p[0]) / (rx * rx) + (p[1] * p[1]) / (ry * ry);
+
+        if (fabsf(p[2]) <= depth && s_ww.n > 1 && e < 0.40f * 0.40f)
         {
-            const float dx = p[0] - s_ww.slot[i][0], dy = p[1] - s_ww.slot[i][1];
-            float       q;
-            if (fabsf(dx) > reach || fabsf(dy) > reach || fabsf(p[2]) > depth)
-                continue;
-            q = sqrtf(dx * dx + dy * dy);
-            if (i == s_ww.sel) cur = q;
-            if (q < best) { best = q; bestI = i; }
+            bestI = -1;
         }
-        if (s_ww.sel >= 0 && cur < 1e8f && bestI != s_ww.sel && best > cur - VR_WW_STICKY_M * hs)
-            bestI = s_ww.sel;   /* still in the lit box: a neighbour must be clearly nearer */
+        else
+        {
+            for (i = 0; i < s_ww.n; i++)
+            {
+                const float dx = p[0] - s_ww.slot[i][0], dy = p[1] - s_ww.slot[i][1];
+                const float q  = sqrtf(dx * dx + dy * dy);
+                if (i == s_ww.sel) cur = q;
+                if (q < best) { best = q; bestI = i; }
+            }
+            if (bestI >= 0 && (best > reach || fabsf(p[2]) > depth))
+                bestI = s_ww.sel;   /* drifted off: the pick stays */
+            else if (s_ww.sel >= 0 && bestI != s_ww.sel && best > cur - VR_WW_STICKY_M * hs)
+                bestI = s_ww.sel;   /* a neighbour must be clearly nearer */
+        }
     }
     if (bestI != s_ww.sel)
     {
         s_ww.sel = bestI;
         if (bestI >= 0)
             VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d lit\n", (int)s_ww.ids[bestI]);
+        else
+            VrOvr_Log("[VR-HANDS] weapon wheel: back at the centre, nothing lit\n");
     }
 }
 
@@ -673,6 +694,14 @@ static void WWheelClose(int apply)
             if (s_mapHand == 1) MapPutBack();   /* one thing per hand */
             VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d drawn (right hand)\n", (int)id);
         }
+        else
+        {
+            VrOvr_Log("[VR-HANDS] weapon wheel: weapon %d could not be equipped now\n", (int)id);
+        }
+    }
+    else
+    {
+        VrOvr_Log("[VR-HANDS] weapon wheel: closed (%s)\n", apply ? "released, nothing lit" : "cancelled");
     }
     s_ww.open = 0;
     s_ww.sel  = -1;
