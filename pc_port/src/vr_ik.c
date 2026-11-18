@@ -1464,6 +1464,23 @@ static int LeftHeldItemMatrix(MATRIX* out)
             RotMul(adj, s_vhR[0], r);   /* right hand not read yet: the left's own */
         }
     }
+    {
+        /* A rotation cannot mirror a shape: it flips the weapon about its own
+         * x as well, and a mesh not centred on its x (the handgun -2..9) then
+         * sits to the side of where the right hand's mirror image would be.
+         * Move it back by twice its middle along that axis - at its drawn
+         * size: the close-up model carries the weapon's own Scale. */
+        extern int Pc_VrWeaponMidX(int itemId, float* midX);
+        const int item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
+        const int w    = PcConfig_GripSlot(item);
+        float     mx;
+        if (s_handKnown[1] && Pc_VrWeaponMidX(item, &mx))
+        {
+            const float k = (w >= 0 ? g_PcConfig.vrGripScale[w] : 100.0f) / 100.0f;
+            for (i = 0; i < 3; i++)
+                ow[i] += r[i][0] * (-2.0f * k * mx);
+        }
+    }
     HeldItemOut(0, r, ow, out);
     return 1;
 }

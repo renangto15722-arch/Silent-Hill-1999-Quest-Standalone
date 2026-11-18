@@ -1233,6 +1233,22 @@ void Pc_VrHolsterModelsUpdate(void)
     }
 }
 
+/* The middle of a weapon's PLM along its own x (model units), for the left
+ * hand's mirror (vr_ik.c LeftHeldItemMatrix). Loads the weapon's copy if it
+ * is not loaded yet. 0 = not a weapon / no model. */
+int Pc_VrWeaponMidX(int itemId, float* midX)
+{
+    const int w = VrHolster_WeaponIndex(itemId);
+    if (!w)
+        return 0;
+    if (!s_vrHolsterModels[w].ready && !s_vrHolsterModels[w].failed)
+        VrHolster_Load(w);
+    if (!s_vrHolsterModels[w].ready)
+        return 0;
+    *midX = 0.5f * (s_vrHolsterModels[w].bmin[0] + s_vrHolsterModels[w].bmax[0]);
+    return 1;
+}
+
 /* A weapon sized to fit a grab box (vr_holster_box.c) and centred in it:
  * rot = how it hangs (unit), centre = the box centre (world Q8, exact),
  * edgeQ8 = the box edge. Its longest side takes 80% of the edge. The
