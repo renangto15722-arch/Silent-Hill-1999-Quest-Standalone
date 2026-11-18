@@ -496,18 +496,8 @@ static void CtrlRotToWorld(const HeadFrame* f, const float r[3][3], float out[3]
     }
 }
 
-static int AimWorldRotation(float out[3][3])
-{
-    HeadFrame f;
-    float     ap[3], ar[3][3];
-
-    if (!HeadFrameGet(&f) || !VrOvr_GetAimPose(ap, ar))
-        return 0;
-    CtrlRotToWorld(&f, ar, out);
-    return 1;
-}
-
-/* Same, for a controller's grip pose (0 = left, 1 = right). */
+/* World rotation of a controller's grip pose (0 = left, 1 = right), axes as
+ * CtrlRotToWorld builds them. */
 static int GripWorldRotation(int hand, float out[3][3])
 {
     HeadFrame f;
@@ -640,88 +630,11 @@ static void HandRefCapture(GsCOORDINATE2* coords)
     }
 }
 
-/* The weapon's grip in the right hand bone's frame, per inventory item:
- * K = Aim^T * Hand, read from the game's aim pose (see the header). */
-#define VR_IK_GRIP_ITEMS  256
-#define VR_IK_GRIP_SETTLE 15     /* frames of steady aiming before reading it */
-static float s_gripK[VR_IK_GRIP_ITEMS][3][3];
-static u8    s_gripKnown[VR_IK_GRIP_ITEMS];
-
-/* The aim direction the animation holds the weapon along: Harry's yaw, and
- * the aim pitch the pose leans to (field_122: 90 deg = level, more = up). */
-static void AnimAimRotation(float out[3][3])
-{
-    const float yaw = BodyYaw();
-    const float pit = (float)(g_SysWork.playerWork.player.properties.player.field_122 - 1024) *
-                      (6.28318531f / 4096.0f);
-    const float fwd[3]   = { sinf(yaw), 0.0f, cosf(yaw) };
-    const float right[3] = { cosf(yaw), 0.0f, -sinf(yaw) };
-    const float cp = cosf(pit), sp = sinf(pit);
-    int i;
-
-    for (i = 0; i < 3; i++)
-    {
-        const float down = (i == 1) ? 1.0f : 0.0f;
-        out[i][0] = right[i];
-        out[i][1] = cp * down + sp * fwd[i];   /* pitch up: the barrel rises (-Y) */
-        out[i][2] = cp * fwd[i] - sp * down;
-    }
-}
-
-/* The aim-pose grip (K, the hand following the aim ray) is a GUN thing. A
- * melee weapon read it too the first time it was raised - after which the
- * hand and the weapon swapped from the grip pose to the aim pose frame, and
- * a VR Weapon Grip offset tuned before no longer sat right, its values the
- * same (the knife). Melee weapons always follow the grip pose. */
-static int IsGunItem(int item)
-{
-    return item >= InvItemId_Handgun && item <= InvItemId_HyperBlaster;
-}
-
-static void GripCapture(GsCOORDINATE2* coords)
-{
-    static int s_aimFrames = 0;
-    const int  item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
-    float      aim[3][3];
-    MATRIX     m;
-    Xf         hand;
-
-    if (!IsGunItem(item) || g_SysWork.playerWork.extra.upperBodyState != PlayerUpperBodyState_Aim)
-    {
-        s_aimFrames = 0;
-        return;
-    }
-    if (s_gripKnown[item] || ++s_aimFrames < VR_IK_GRIP_SETTLE)
-        return;
-
-    Vw_CoordHierarchyMatrixCompute(&coords[HarryBone_RightHand], &m);
-    XfFromMatrix(&m, &hand);
-    if (!IsScaledRotation(hand.r))
-        return;   /* not posed this frame: try the next */
-    Ortho(hand.r, hand.r);
-    AnimAimRotation(aim);
-    RotMulTransA(aim, hand.r, s_gripK[item]);
-    s_gripKnown[item] = 1;
-    VrOvr_Log("[VR-IK] weapon grip read for item %d: K = [%.2f %.2f %.2f | %.2f %.2f %.2f | %.2f %.2f %.2f]\n",
-              item,
-              (double)s_gripK[item][0][0], (double)s_gripK[item][0][1], (double)s_gripK[item][0][2],
-              (double)s_gripK[item][1][0], (double)s_gripK[item][1][1], (double)s_gripK[item][1][2],
-              (double)s_gripK[item][2][0], (double)s_gripK[item][2][1], (double)s_gripK[item][2][2]);
-}
-
-/* World rotation the right hand bone should have this frame, 0 = keep the
- * animation's (no weapon, grip not read yet, no aim pose). */
-static int GunHandRotation(float out[3][3])
-{
-    const int item = (int)g_SavegamePtr->equippedWeapon & 0xFF;
-    float     aim[3][3];
-
-    if (g_SysWork.playerCombat.weaponAttack == NO_VALUE || !IsGunItem(item) || !s_gripKnown[item] ||
-        !AimWorldRotation(aim))
-        return 0;
-    RotMul(aim, s_gripK[item], out);
-    return 1;
-}
+/* Weapons always sit in the controller's GRIP pose. A second frame - the
+ * game's aim animation read once per gun the first time it was aimed
+ * (K = Aim^T * Hand) - swapped every gun to the AIM pose ~40 deg away
+ * after its first aim, so a placement tuned at the draw moved "a few
+ * seconds later" (Renan 17-18/11/2026). Removed: one frame, always. */
 
 /* Rotation by angle t about unit axis a. */
 static void AxisRotation(const float a[3], float t, float out[3][3])
@@ -1241,11 +1154,8 @@ static int RightWeaponAdjust(float adj[3][3], float ow[3], float pivot[3])
         return 0;
     a = (w >= 0) ? g_PcConfig.vrGrip[w] : zero;
 
-    /* the controller frame the hand follows: the aim pose with a gun, the
-     * grip pose with anything else */
-    if (!(g_SysWork.playerCombat.weaponAttack != NO_VALUE && IsGunItem(item) && s_gripKnown[item] &&
-          AimWorldRotation(c)) &&
-        !GripWorldRotation(1, c))
+    /* the controller frame the hand follows: the grip pose */
+    if (!GripWorldRotation(1, c))
         return 0;
     for (i = 0; i < 3; i++)
         for (j = 0; j < 3; j++) ct[i][j] = c[j][i];
@@ -1286,8 +1196,8 @@ int VrIk_HeldItemMatrix(MATRIX* out)
 /* Player_Update tail (player_control.c). */
 void VrIk_ApplyArms(GsCOORDINATE2* coords)
 {
-    float tl[3], tr[3], gun[3][3], hw[2][3][3], sc;
-    int   haveL = 0, haveR = 0, haveGun, haveHand[2], b, h;
+    float tl[3], tr[3], hw[2][3][3], sc;
+    int   haveL = 0, haveR = 0, haveHand[2], b, h;
 
     if (coords != g_SysWork.playerBoneCoords)
         return;
@@ -1341,10 +1251,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
         coords[b].flg = 0;
 
     /* the animation's references, before anything here moves the body */
-    GripCapture(coords);
     HandRefCapture(coords);
-    /* a knife in the LEFT hand (vr_interact.c): the right hand is empty */
-    haveGun = haveR && VrInteract_WeaponHand() == 1 && GunHandRotation(gun);
 
     /* each hand: the controller's rotation times the fixed offset K */
     for (h = 0; h < 2; h++)
@@ -1415,8 +1322,7 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
         const float* t   = h ? tr : tl;
         const int    has = h ? haveR : haveL;
         float        g[3][3];
-        const float (*rot)[3] = (h == 1 && haveGun) ? (const float (*)[3])gun :
-                                haveHand[h]           ? (const float (*)[3])hw[h] : NULL;
+        const float (*rot)[3] = haveHand[h] ? (const float (*)[3])hw[h] : NULL;
         int i, j;
         if (!has) continue;
         if (rot == NULL)
