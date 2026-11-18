@@ -699,6 +699,12 @@ void PcConfig_Load(const char* path)
             extern int g_PsyX_FastEyes;
             g_PsyX_FastEyes = (atoi(value) != 0);
         }
+        else if (strcmp(key, "vr_eye_instancing") == 0)
+        {
+            /* Quest: both eyes in one instanced draw (PsyX_render.cpp EYE INSTANCING) */
+            extern int g_PsyX_EyeInstancing;
+            g_PsyX_EyeInstancing = (atoi(value) != 0);
+        }
 #endif
         else if (strcmp(key, "snow_size") == 0)
         {
