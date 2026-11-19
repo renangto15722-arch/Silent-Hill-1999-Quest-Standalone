@@ -59,7 +59,7 @@ final class DiscImport {
         Pattern.compile("silent.?hill|sl[ue]s.?0(0707|1514)|slpm.?86192|texupload|hd.?maps?",
                         Pattern.CASE_INSENSITIVE);
 
-    enum Kind { BIN, CUE, ARC_DISC, ARC_TEXTURES, ARC_LOAD, ARC_NESTED }
+    enum Kind { BIN, CUE, ARC_DISC, ARC_TEXTURES, ARC_LOAD, ARC_NESTED, DIR_TEXTURES, DIR_LOAD }
 
     static final class Job {
         final Kind kind;
@@ -143,21 +143,7 @@ final class DiscImport {
         }
 
         List<File> cues = new ArrayList<>();
-        for (File f : files) {
-            if (!f.isFile()) continue;
-            String n = lower(f.getName());
-            if (n.endsWith(".tmp")) continue;
-            if (n.endsWith(".bin")) {
-                if (isSilentHill(f.getName(), bootName(f))) {
-                    discBins.add(n);
-                    if (!new File(gamedata, f.getName()).exists()) plan.jobs.add(new Job(Kind.BIN, f));
-                }
-            } else if (n.endsWith(".cue")) {
-                cues.add(f);
-            } else {
-                classifyArchive(f, root, plan);
-            }
-        }
+        scanDir(downloads(), 0, root, plan, discBins, cues);
         for (File cue : cues) {
             String bin = cueBinName(cue);
             if (bin != null && discBins.contains(lower(bin))
@@ -165,6 +151,106 @@ final class DiscImport {
                 plan.jobs.add(new Job(Kind.CUE, cue));
         }
         return plan;
+    }
+
+    /** How deep into folders under Download to look (0 = Download itself):
+     *  e.g. Download/<what the Files app unpacked>/<its folder>/disc.bin. */
+    private static final int MAX_DEPTH = 3;
+
+    /** Download and its folders, MAX_DEPTH deep. Loose files follow the same
+     *  rules as at the top; loose HD packs (as unpacked by the Files app) too:
+     *   - a folder right in Download that holds texupload-* files = texture pack
+     *   - TIM / 1ST / ITEM ... folders = HD maps / menus, only when their parent
+     *     is named like Silent Hill ("HD Maps") or holds two or more of them,
+     *     so an unrelated folder that happens to be called TIM or BG is left alone. */
+    private static void scanDir(File dir, int depth, File root, Plan plan,
+                                Set<String> discBins, List<File> cues) {
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        File gamedata = new File(root, "gamedata");
+
+        int loadDirs = 0;
+        for (File k : kids) if (k.isDirectory() && isLoadFolderName(k.getName())) loadDirs++;
+        boolean shParent = SH_NAME.matcher(dir.getName()).find();
+
+        for (File k : kids) {
+            String n = lower(k.getName());
+            if (n.startsWith(".")) continue;
+            if (k.isDirectory()) {
+                if (depth == 0 && hasTextureFiles(k, 0)) {
+                    if (!new File(gamedata, "texturemods/" + k.getName()).exists())
+                        plan.jobs.add(new Job(Kind.DIR_TEXTURES, k));
+                } else if (isLoadFolderName(k.getName()) && (shParent || loadDirs >= 2)) {
+                    if (needsMerge(k, new File(gamedata, "load/" + k.getName())))
+                        plan.jobs.add(new Job(Kind.DIR_LOAD, k));
+                } else if (depth < MAX_DEPTH) {
+                    scanDir(k, depth + 1, root, plan, discBins, cues);
+                }
+                continue;
+            }
+            if (n.endsWith(".tmp")) continue;
+            if (n.endsWith(".bin")) {
+                if (isSilentHill(k.getName(), bootName(k))) {
+                    discBins.add(n);
+                    if (!new File(gamedata, k.getName()).exists()) plan.jobs.add(new Job(Kind.BIN, k));
+                }
+            } else if (n.endsWith(".cue")) {
+                cues.add(k);
+            } else {
+                classifyArchive(k, root, plan);
+            }
+        }
+    }
+
+    private static boolean isLoadFolderName(String name) {
+        for (String f : LOAD_FOLDERS) if (f.equalsIgnoreCase(name)) return true;
+        return false;
+    }
+
+    /** Any texupload-* file in dir or below it (a few levels). */
+    private static boolean hasTextureFiles(File dir, int depth) {
+        File[] kids = dir.listFiles();
+        if (kids == null || depth > 6) return false;
+        for (File k : kids) {
+            if (k.isFile() && lower(k.getName()).startsWith("texupload-")) return true;
+        }
+        for (File k : kids) {
+            if (k.isDirectory() && hasTextureFiles(k, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    /** True when src has a file that dst does not have yet. */
+    private static boolean needsMerge(File src, File dst) {
+        File[] kids = src.listFiles();
+        if (kids == null) return false;
+        for (File k : kids) {
+            File d = new File(dst, k.getName());
+            if (k.isDirectory() ? needsMerge(k, d) : (k.isFile() && !d.exists())) return true;
+        }
+        return false;
+    }
+
+    /** Moves every file of src missing in dst (keeping the layout); a whole
+     *  folder is renamed when dst does not have it yet. Empty folders left in
+     *  src are removed. */
+    private static void mergeMove(File src, File dst) throws IOException {
+        if (!dst.exists()) {
+            dst.getParentFile().mkdirs();
+            if (src.renameTo(dst)) return;
+        }
+        dst.mkdirs();
+        File[] kids = src.listFiles();
+        if (kids != null) {
+            for (File k : kids) {
+                File d = new File(dst, k.getName());
+                if (k.isDirectory()) mergeMove(k, d);
+                else if (!d.exists()) move(k, d);
+            }
+        }
+        String[] left = src.list();
+        if (left != null && left.length == 0 && !src.delete())
+            Log.w(TAG, "could not remove the empty folder " + src);
     }
 
     private static void classifyArchive(File f, File root, Plan plan) {
@@ -267,6 +353,14 @@ final class DiscImport {
                                    int at = loadFolderStart(e.path);
                                    return at >= 0 ? e.path.substring(at) : null;
                                });
+                        break;
+                    case DIR_TEXTURES:
+                        sub.step("Moving texture pack " + j.src.getName(), 0);
+                        mergeMove(j.src, new File(gamedata, "texturemods/" + j.src.getName()));
+                        break;
+                    case DIR_LOAD:
+                        sub.step("Moving HD pack folder " + j.src.getName(), 0);
+                        mergeMove(j.src, new File(gamedata, "load/" + j.src.getName()));
                         break;
                     case ARC_NESTED:
                         unpack(j.src, downloads(), "Unpacking " + j.src.getName(), sub,

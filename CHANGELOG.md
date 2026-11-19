@@ -7,6 +7,7 @@
   - Disc: `.bin` + `.cue`, or a `.zip`, `.7z` or `.rar` that has them, also one archive inside another (any file name; the disc is recognised by its boot file).
   - HD textures: `.zip` → `texturemods` (kept zipped); `.7z` / `.rar` → unpacked into `texturemods`. HD maps / menus (`TIM`, `1ST`, `ITEM`...) in any of the three → unpacked into `load`.
   - RAR5 and password-protected archives cannot be read; the panel says which file and why.
+  - Folders inside *Download* are searched too (up to 3 levels), e.g. what the Files app unpacked: the disc, archives, a texture pack folder (`texupload-*` files) → `texturemods`, `TIM` / `1ST` / `ITEM`... folders → `load` (only inside a Silent Hill / "HD Maps" folder, or two or more of them together).
   - Nothing already installed is overwritten; files it does not recognise stay in *Download*.
 - **Setup panel** before the game when it cannot start yet: asks for "All files access" and goes on by itself once it is on (no more starting the game twice), shows progress while it installs, lists the files it could not use, and explains how to get the disc when there is none.
 
