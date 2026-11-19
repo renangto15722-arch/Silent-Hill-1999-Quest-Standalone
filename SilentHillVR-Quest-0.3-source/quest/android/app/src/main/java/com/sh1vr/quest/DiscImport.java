@@ -3,13 +3,21 @@ package com.sh1vr.quest;
 import android.os.Environment;
 import android.util.Log;
 
+import com.github.junrar.Archive;
+import com.github.junrar.exception.RarException;
+import com.github.junrar.rarfile.FileHeader;
+
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
+import org.apache.commons.compress.archivers.sevenz.SevenZFile;
+
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -24,12 +32,15 @@ import java.util.zip.ZipFile;
 
 /** Picks up what the player downloaded with the Quest browser (/sdcard/Download)
  *  and moves it where the game reads it, so no PC or adb is needed:
- *   - Silent Hill .bin (+ its .cue), loose or inside a .zip  -> gamedata/
- *   - texture pack .zip (texupload-* entries)                 -> gamedata/texturemods/ (kept zipped)
- *   - HD maps / menus .zip (TIM, 1ST, ITEM ... folders)       -> extracted into gamedata/load/
+ *   - Silent Hill .bin (+ its .cue), loose or inside a .zip/.7z/.rar  -> gamedata/
+ *   - texture pack (texupload-* files): .zip moved as is              -> gamedata/texturemods/
+ *                                       .7z/.rar unpacked into        -> gamedata/texturemods/<name>/
+ *   - HD maps / menus (TIM, 1ST, ITEM ... folders), any archive       -> unpacked into gamedata/load/
+ *   - an archive that only holds other archives (a .rar inside a .7z) -> unpacked into Download, then
+ *     those are sorted the same way
  *  Same sorting rules as the PC installer (InstallSH-Quest.bat). Unrelated
  *  files are left alone; nothing that already exists in the destination is
- *  overwritten. */
+ *  overwritten. RAR5 cannot be read (junrar only knows RAR up to v4). */
 final class DiscImport {
     private static final String TAG = "SilentHillVR";
 
@@ -42,13 +53,30 @@ final class DiscImport {
     private static final String[] SH_SERIALS =
         { "SLUS_007.07", "SLES_015.14", "SLPM_861.92" };
 
-    enum Kind { BIN, CUE, ZIP_DISC, ZIP_TEXTURES, ZIP_LOAD }
+    /** Names that look like Silent Hill: an archive with one of these names
+     *  that cannot be used is reported on the setup panel. */
+    private static final Pattern SH_NAME =
+        Pattern.compile("silent.?hill|sl[ue]s.?0(0707|1514)|slpm.?86192|texupload|hd.?maps?",
+                        Pattern.CASE_INSENSITIVE);
+
+    enum Kind { BIN, CUE, ARC_DISC, ARC_TEXTURES, ARC_LOAD, ARC_NESTED }
 
     static final class Job {
         final Kind kind;
         final File src;
         Job(Kind kind, File src) { this.kind = kind; this.src = src; }
         @Override public String toString() { return kind + " " + src.getName(); }
+    }
+
+    static final class Plan {
+        final List<Job> jobs = new ArrayList<>();
+        /** Archives in Download that look like Silent Hill but cannot be used. */
+        final List<String> problems = new ArrayList<>();
+    }
+
+    static final class Result {
+        int failed;
+        final List<String> problems = new ArrayList<>();
     }
 
     interface Progress { void step(String what, int percent); }
@@ -63,7 +91,7 @@ final class DiscImport {
      *  is waiting to be imported, or there is no disc in gamedata/ at all. */
     static boolean needsSetup(File root) {
         try {
-            return !plan(root).isEmpty() || !hasDisc(new File(root, "gamedata"));
+            return !plan(root).jobs.isEmpty() || !hasDisc(new File(root, "gamedata"));
         } catch (Exception e) {
             Log.w(TAG, "import check failed; starting the game anyway", e);
             return false;
@@ -75,17 +103,34 @@ final class DiscImport {
         File[] files = gamedata.listFiles();
         if (files == null) return false;
         for (File f : files) {
-            if (f.isFile() && lower(f.getName()).endsWith(".bin") && bootName(fileSource(f)) != null)
+            if (f.isFile() && lower(f.getName()).endsWith(".bin") && bootName(f) != null)
                 return true;
         }
         return false;
     }
 
-    /** What would be imported now (read-only: looks, never moves). */
-    static List<Job> plan(File root) {
-        List<Job> jobs = new ArrayList<>();
+    /** Imports everything usable from Download. Archives that held other
+     *  archives are unpacked first, then sorted in a following round. */
+    static Result importAll(File root, Progress progress) {
+        Result r = new Result();
+        for (int round = 0; round < 4; round++) {
+            Plan p = plan(root);
+            Log.i(TAG, "setup round " + round + ": " + p.jobs + " problems " + p.problems);
+            r.problems.clear();
+            r.problems.addAll(p.problems);
+            if (p.jobs.isEmpty()) break;
+            r.failed += run(root, p.jobs, progress);
+        }
+        progress.step("Done", 100);
+        return r;
+    }
+
+    // ---- planning (read-only: looks, never moves)
+
+    static Plan plan(File root) {
+        Plan plan = new Plan();
         File[] files = downloads().listFiles();
-        if (files == null) return jobs;
+        if (files == null) return plan;
 
         File gamedata = new File(root, "gamedata");
         Set<String> discBins = new HashSet<>();   // lower-case names of SH .bin files
@@ -101,59 +146,86 @@ final class DiscImport {
         for (File f : files) {
             if (!f.isFile()) continue;
             String n = lower(f.getName());
+            if (n.endsWith(".tmp")) continue;
             if (n.endsWith(".bin")) {
-                if (isSilentHill(f.getName(), fileSource(f))) {
+                if (isSilentHill(f.getName(), bootName(f))) {
                     discBins.add(n);
-                    if (!new File(gamedata, f.getName()).exists()) jobs.add(new Job(Kind.BIN, f));
+                    if (!new File(gamedata, f.getName()).exists()) plan.jobs.add(new Job(Kind.BIN, f));
                 }
             } else if (n.endsWith(".cue")) {
                 cues.add(f);
-            } else if (n.endsWith(".zip")) {
-                Job j = classifyZip(f, root);
-                if (j != null) jobs.add(j);
+            } else {
+                classifyArchive(f, root, plan);
             }
         }
         for (File cue : cues) {
             String bin = cueBinName(cue);
             if (bin != null && discBins.contains(lower(bin))
                     && !new File(gamedata, cue.getName()).exists())
-                jobs.add(new Job(Kind.CUE, cue));
+                plan.jobs.add(new Job(Kind.CUE, cue));
         }
-        return jobs;
+        return plan;
     }
 
-    private static Job classifyZip(File zip, File root) {
-        try (ZipFile z = new ZipFile(zip)) {
-            boolean textures = false, load = false;
-            ZipEntry disc = null;
-            Enumeration<? extends ZipEntry> en = z.entries();
-            while (en.hasMoreElements()) {
-                ZipEntry e = en.nextElement();
-                String path = e.getName().replace('\\', '/');
-                String base = path.substring(path.lastIndexOf('/') + 1);
-                if (lower(base).startsWith("texupload-")) textures = true;
-                if (loadFolderStart(path) >= 0) load = true;
-                if (disc == null && !e.isDirectory() && lower(base).endsWith(".bin")) {
-                    final ZipEntry entry = e;
-                    if (isSilentHill(base, (off, buf) -> readZipAt(z, entry, off, buf))) disc = e;
+    private static void classifyArchive(File f, File root, Plan plan) {
+        boolean shName = SH_NAME.matcher(f.getName()).find();
+        Arc a;
+        try {
+            a = openArc(f);
+        } catch (Unsupported e) {
+            if (shName) plan.problems.add(f.getName() + ": " + e.getMessage());
+            return;
+        } catch (IOException e) {
+            Log.w(TAG, "cannot read archive " + f, e);
+            if (shName) plan.problems.add(f.getName() + ": cannot be read (damaged or password protected?)");
+            return;
+        }
+        if (a == null) return;   // not an archive
+        try (Arc arc = a) {
+            boolean textures = false, load = false, nested = false;
+            Ent disc = null;
+            for (Ent e : arc.entries()) {
+                if (e.dir) continue;
+                String base = lower(e.base());
+                if (base.startsWith("texupload-")) textures = true;
+                if (loadFolderStart(e.path) >= 0) load = true;
+                // Only unpack an archive of archives that is about Silent Hill:
+                // the outer one is deleted afterwards.
+                if (isArchiveName(base) && (shName || SH_NAME.matcher(e.base()).find())) nested = true;
+                if (disc == null && base.endsWith(".bin")) {
+                    String boot = null;
+                    try (InputStream in = arc.open(e)) {
+                        boot = bootName(in);
+                    } catch (IOException ex) {
+                        Log.w(TAG, "cannot read " + e.path + " in " + f, ex);
+                    }
+                    if (isSilentHill(e.base(), boot)) disc = e;
                 }
             }
             File gamedata = new File(root, "gamedata");
             if (disc != null) {
-                String name = disc.getName().replace('\\', '/');
-                name = name.substring(name.lastIndexOf('/') + 1);
-                return new File(gamedata, name).exists() ? null : new Job(Kind.ZIP_DISC, zip);
+                if (!new File(gamedata, disc.base()).exists()) plan.jobs.add(new Job(Kind.ARC_DISC, f));
+            } else if (textures) {
+                if (!textureDest(root, f, arc.isZip()).exists()) plan.jobs.add(new Job(Kind.ARC_TEXTURES, f));
+            } else if (load) {
+                plan.jobs.add(new Job(Kind.ARC_LOAD, f));
+            } else if (nested) {
+                plan.jobs.add(new Job(Kind.ARC_NESTED, f));
+            } else if (shName) {
+                plan.problems.add(f.getName() + ": no Silent Hill disc or HD pack inside");
             }
-            if (textures) {
-                return new File(gamedata, "texturemods/" + zip.getName()).exists()
-                     ? null : new Job(Kind.ZIP_TEXTURES, zip);
-            }
-            if (load) return new Job(Kind.ZIP_LOAD, zip);
         } catch (IOException e) {
-            Log.w(TAG, "not a readable zip: " + zip, e);
+            Log.w(TAG, "cannot read archive " + f, e);
+            if (shName) plan.problems.add(f.getName() + ": cannot be read");
         }
-        return null;
     }
+
+    private static File textureDest(File root, File arc, boolean zip) {
+        File dir = new File(root, "gamedata/texturemods");
+        return zip ? new File(dir, arc.getName()) : new File(dir, stripExt(arc.getName()));
+    }
+
+    // ---- running
 
     /** Runs the jobs from plan(). A failed job is logged and skipped; its
      *  source stays in Download. Returns how many jobs failed. */
@@ -174,15 +246,32 @@ final class DiscImport {
                         sub.step("Moving " + j.src.getName(), 0);
                         move(j.src, new File(gamedata, j.src.getName()));
                         break;
-                    case ZIP_TEXTURES:
-                        sub.step("Moving texture pack " + j.src.getName(), 0);
-                        move(j.src, new File(gamedata, "texturemods/" + j.src.getName()));
+                    case ARC_DISC:
+                        unpack(j.src, gamedata, "Unpacking " + j.src.getName(), sub, e -> {
+                            String b = lower(e.base());
+                            return b.endsWith(".bin") || b.endsWith(".cue") ? e.base() : null;
+                        });
                         break;
-                    case ZIP_DISC:
-                        extractDisc(j.src, gamedata, sub);
+                    case ARC_TEXTURES:
+                        if (isZipFile(j.src)) {
+                            sub.step("Moving texture pack " + j.src.getName(), 0);
+                            move(j.src, textureDest(root, j.src, true));
+                        } else {
+                            File dst = textureDest(root, j.src, false);
+                            unpack(j.src, dst, "Installing texture pack " + j.src.getName(), sub, e -> e.path);
+                        }
                         break;
-                    case ZIP_LOAD:
-                        extractLoad(j.src, new File(gamedata, "load"), sub);
+                    case ARC_LOAD:
+                        unpack(j.src, new File(gamedata, "load"), "Installing HD pack " + j.src.getName(), sub,
+                               e -> {
+                                   int at = loadFolderStart(e.path);
+                                   return at >= 0 ? e.path.substring(at) : null;
+                               });
+                        break;
+                    case ARC_NESTED:
+                        unpack(j.src, downloads(), "Unpacking " + j.src.getName(), sub,
+                               e -> isArchiveName(lower(e.base())) && !new File(downloads(), e.base()).exists()
+                                    ? e.base() : null);
                         break;
                 }
                 Log.i(TAG, "imported " + j);
@@ -191,11 +280,70 @@ final class DiscImport {
                 Log.e(TAG, "import failed: " + j, e);
             }
         }
-        progress.step("Done", 100);
         return failed;
     }
 
-    // ---- moving / extracting
+    /** Where an entry goes, relative to the destination dir; null = skip it. */
+    private interface Pick { String to(Ent e); }
+
+    /** Unpacks the picked entries of an archive into dstDir (in archive order:
+     *  one pass, also fast for solid 7z/rar), then deletes the archive. */
+    private static void unpack(File arcFile, File dstDir, String label, Progress p, Pick pick)
+            throws IOException {
+        dstDir.mkdirs();
+        String dstPath = dstDir.getCanonicalPath() + File.separator;
+        try (Arc arc = openArc(arcFile)) {
+            if (arc == null) throw new IOException("not an archive: " + arcFile);
+            long total = 0;
+            for (Ent e : arc.entries()) if (!e.dir && pick.to(e) != null) total += Math.max(0, e.size);
+            final long all = total;
+            final long[] done = { 0 };
+            p.step(label, 0);
+            arc.each(e -> {
+                if (e.dir) return null;
+                String rel = pick.to(e);
+                if (rel == null) return null;
+                File dst = new File(dstDir, rel);
+                if (!dst.getCanonicalPath().startsWith(dstPath))
+                    throw new IOException("bad path in archive: " + e.path);
+                if (dst.exists()) return null;
+                dst.getParentFile().mkdirs();
+                return new CountingFileOut(dst, n -> {
+                    done[0] += n;
+                    p.step(label, pct(done[0], all));
+                });
+            });
+        }
+        if (!arcFile.delete()) Log.w(TAG, "unpacked but could not delete " + arcFile);
+    }
+
+    private interface Counter { void add(long n); }
+
+    /** Writes to dst.tmp, renames to dst on close; reports progress every 4 MB. */
+    private static final class CountingFileOut extends OutputStream {
+        private final File dst, tmp;
+        private final FileOutputStream out;
+        private final Counter counter;
+        private long pending;
+
+        CountingFileOut(File dst, Counter counter) throws IOException {
+            this.dst = dst;
+            this.tmp = new File(dst.getPath() + ".tmp");
+            this.out = new FileOutputStream(tmp);
+            this.counter = counter;
+        }
+        @Override public void write(int b) throws IOException { out.write(b); count(1); }
+        @Override public void write(byte[] b, int off, int len) throws IOException { out.write(b, off, len); count(len); }
+        private void count(long n) {
+            pending += n;
+            if (pending >= (4 << 20)) { counter.add(pending); pending = 0; }
+        }
+        @Override public void close() throws IOException {
+            out.close();
+            if (pending > 0) { counter.add(pending); pending = 0; }
+            if (!tmp.renameTo(dst)) throw new IOException("cannot write " + dst);
+        }
+    }
 
     /** Rename (same storage: instant), else copy + delete. */
     private static void move(File src, File dst) throws IOException {
@@ -204,95 +352,16 @@ final class DiscImport {
         if (src.renameTo(dst)) return;
         File tmp = new File(dst.getPath() + ".tmp");
         try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(tmp)) {
-            copy(in, out, null, 0);
+            copy(in, out);
         }
         if (!tmp.renameTo(dst)) throw new IOException("cannot write " + dst);
         if (!src.delete()) Log.w(TAG, "copied but could not delete " + src);
     }
 
-    /** The disc's .bin and .cue go to gamedata/; then the zip is deleted. */
-    private static void extractDisc(File zip, File gamedata, Progress p) throws IOException {
-        try (ZipFile z = new ZipFile(zip)) {
-            long total = 0;
-            List<ZipEntry> want = new ArrayList<>();
-            Enumeration<? extends ZipEntry> en = z.entries();
-            while (en.hasMoreElements()) {
-                ZipEntry e = en.nextElement();
-                String n = lower(e.getName());
-                if (!e.isDirectory() && (n.endsWith(".bin") || n.endsWith(".cue"))) {
-                    want.add(e);
-                    total += Math.max(0, e.getSize());
-                }
-            }
-            long[] done = { 0 };
-            for (ZipEntry e : want) {
-                String name = e.getName().replace('\\', '/');
-                name = name.substring(name.lastIndexOf('/') + 1);
-                File dst = new File(gamedata, name);
-                if (dst.exists()) continue;
-                p.step("Unpacking " + name, pct(done[0], total));
-                extractEntry(z, e, dst, done, total, p, "Unpacking " + name);
-            }
-        }
-        if (!zip.delete()) Log.w(TAG, "unpacked but could not delete " + zip);
-    }
-
-    /** Every TIM/1ST/ITEM... folder in the zip lands in gamedata/load/ (the
-     *  path above that folder is dropped); then the zip is deleted. */
-    private static void extractLoad(File zip, File load, Progress p) throws IOException {
-        String loadPath = load.getCanonicalPath() + File.separator;
-        try (ZipFile z = new ZipFile(zip)) {
-            long total = 0;
-            List<ZipEntry> want = new ArrayList<>();
-            Enumeration<? extends ZipEntry> en = z.entries();
-            while (en.hasMoreElements()) {
-                ZipEntry e = en.nextElement();
-                if (!e.isDirectory() && loadFolderStart(e.getName().replace('\\', '/')) >= 0) {
-                    want.add(e);
-                    total += Math.max(0, e.getSize());
-                }
-            }
-            long[] done = { 0 };
-            String label = "Installing HD pack " + zip.getName();
-            for (ZipEntry e : want) {
-                String path = e.getName().replace('\\', '/');
-                File dst = new File(load, path.substring(loadFolderStart(path)));
-                if (!dst.getCanonicalPath().startsWith(loadPath))
-                    throw new IOException("bad zip path: " + path);
-                if (dst.exists()) { done[0] += Math.max(0, e.getSize()); continue; }
-                dst.getParentFile().mkdirs();
-                extractEntry(z, e, dst, done, total, p, label);
-            }
-        }
-        if (!zip.delete()) Log.w(TAG, "unpacked but could not delete " + zip);
-    }
-
-    private static void extractEntry(ZipFile z, ZipEntry e, File dst, long[] done, long total,
-                                     Progress p, String label) throws IOException {
-        File tmp = new File(dst.getPath() + ".tmp");
-        try (InputStream in = z.getInputStream(e); OutputStream out = new FileOutputStream(tmp)) {
-            copy(in, out, (n) -> {
-                done[0] += n;
-                p.step(label, pct(done[0], total));
-            }, 4 << 20);
-        }
-        if (!tmp.renameTo(dst)) throw new IOException("cannot write " + dst);
-    }
-
-    private interface Counter { void add(long n); }
-
-    /** Copies in → out; reports to counter about every reportEvery bytes. */
-    private static void copy(InputStream in, OutputStream out, Counter counter, long reportEvery)
-            throws IOException {
+    private static void copy(InputStream in, OutputStream out) throws IOException {
         byte[] buf = new byte[1 << 16];
-        long pending = 0;
         int n;
-        while ((n = in.read(buf)) > 0) {
-            out.write(buf, 0, n);
-            pending += n;
-            if (counter != null && pending >= reportEvery) { counter.add(pending); pending = 0; }
-        }
-        if (counter != null && pending > 0) counter.add(pending);
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
     }
 
     private static int pct(long done, long total) {
@@ -311,66 +380,286 @@ final class DiscImport {
         return -1;
     }
 
-    // ---- disc identification (port of Pc_DetectRegionFromBin, main_pc.c)
+    // ---- archives: one interface over .zip / .7z / .rar
 
-    private interface ByteSource { int readAt(long off, byte[] buf) throws IOException; }
-
-    private static ByteSource fileSource(File f) {
-        return (off, buf) -> {
-            try (RandomAccessFile r = new RandomAccessFile(f, "r")) {
-                r.seek(off);
-                int got = 0, n;
-                while (got < buf.length && (n = r.read(buf, got, buf.length - got)) > 0) got += n;
-                return got;
-            }
-        };
+    private static final class Ent {
+        final String path;   // '/' separated, as stored
+        final long size;
+        final boolean dir;
+        final int index;     // position in the archive
+        Ent(String path, long size, boolean dir, int index) {
+            this.path = path.replace('\\', '/');
+            this.size = size;
+            this.dir = dir;
+            this.index = index;
+        }
+        String base() { return path.substring(path.lastIndexOf('/') + 1); }
     }
 
-    private static int readZipAt(ZipFile z, ZipEntry e, long off, byte[] buf) throws IOException {
-        try (InputStream in = z.getInputStream(e)) {
-            long left = off;
-            while (left > 0) {
-                long s = in.skip(left);
-                if (s <= 0) { if (in.read() < 0) return 0; s = 1; }
-                left -= s;
-            }
+    /** For each entry in archive order: the stream to write it to, or null to skip. */
+    private interface Sink { OutputStream open(Ent e) throws IOException; }
+
+    private interface Arc extends Closeable {
+        List<Ent> entries();
+        /** One entry's data (random access: may decode what comes before it). */
+        InputStream open(Ent e) throws IOException;
+        /** Sequential pass over every entry. */
+        void each(Sink sink) throws IOException;
+        boolean isZip();
+    }
+
+    private static final class Unsupported extends IOException {
+        Unsupported(String m) { super(m); }
+    }
+
+    private static boolean isArchiveName(String lowerName) {
+        return lowerName.endsWith(".zip") || lowerName.endsWith(".7z") || lowerName.endsWith(".rar");
+    }
+
+    private static byte[] magic(File f) {
+        byte[] b = new byte[8];
+        try (InputStream in = new FileInputStream(f)) {
             int got = 0, n;
-            while (got < buf.length && (n = in.read(buf, got, buf.length - got)) > 0) got += n;
-            return got;
+            while (got < b.length && (n = in.read(b, got, b.length - got)) > 0) got += n;
+            return got == b.length ? b : null;
+        } catch (IOException e) {
+            return null;
         }
     }
 
-    private static boolean isSilentHill(String fileName, ByteSource src) {
-        String boot = bootName(src);
+    private static boolean isZipFile(File f) {
+        byte[] m = magic(f);
+        return m != null && m[0] == 'P' && m[1] == 'K' && m[2] == 3 && m[3] == 4;
+    }
+
+    /** Opens f by its signature (not its extension). null = not an archive. */
+    private static Arc openArc(File f) throws IOException {
+        byte[] m = magic(f);
+        if (m == null) return null;
+        if (m[0] == 'P' && m[1] == 'K' && m[2] == 3 && m[3] == 4) return new ZipArc(f);
+        if ((m[0] & 0xFF) == 0x37 && (m[1] & 0xFF) == 0x7A && (m[2] & 0xFF) == 0xBC
+                && (m[3] & 0xFF) == 0xAF && (m[4] & 0xFF) == 0x27 && (m[5] & 0xFF) == 0x1C)
+            return new SevenZArc(f);
+        if (m[0] == 'R' && m[1] == 'a' && m[2] == 'r' && m[3] == '!' && m[4] == 0x1A && m[5] == 0x07) {
+            if (m[6] == 0x01)
+                throw new Unsupported("RAR5 archives cannot be read here. "
+                    + "Unpack it on a phone or PC, or download a .zip / .7z instead");
+            return new RarArc(f);
+        }
+        return null;
+    }
+
+    private static final class ZipArc implements Arc {
+        private final ZipFile z;
+        private final List<ZipEntry> zes = new ArrayList<>();
+        private final List<Ent> ents = new ArrayList<>();
+
+        ZipArc(File f) throws IOException {
+            z = new ZipFile(f);
+            Enumeration<? extends ZipEntry> en = z.entries();
+            while (en.hasMoreElements()) {
+                ZipEntry e = en.nextElement();
+                ents.add(new Ent(e.getName(), e.getSize(), e.isDirectory(), zes.size()));
+                zes.add(e);
+            }
+        }
+        @Override public List<Ent> entries() { return ents; }
+        @Override public InputStream open(Ent e) throws IOException { return z.getInputStream(zes.get(e.index)); }
+        @Override public void each(Sink sink) throws IOException {
+            for (Ent e : ents) {
+                OutputStream out = sink.open(e);
+                if (out == null) continue;
+                try (InputStream in = open(e); OutputStream o = out) { copy(in, o); }
+            }
+        }
+        @Override public boolean isZip() { return true; }
+        @Override public void close() throws IOException { z.close(); }
+    }
+
+    private static final class SevenZArc implements Arc {
+        private final File file;
+        private SevenZFile sz;
+        private final List<SevenZArchiveEntry> zes = new ArrayList<>();
+        private final List<Ent> ents = new ArrayList<>();
+
+        SevenZArc(File f) throws IOException {
+            file = f;
+            sz = SevenZFile.builder().setFile(f).get();
+            for (SevenZArchiveEntry e : sz.getEntries()) {
+                ents.add(new Ent(e.getName(), e.getSize(), e.isDirectory(), zes.size()));
+                zes.add(e);
+            }
+        }
+        @Override public List<Ent> entries() { return ents; }
+        @Override public InputStream open(Ent e) throws IOException { return sz.getInputStream(zes.get(e.index)); }
+        @Override public void each(Sink sink) throws IOException {
+            // Fresh reader, walked with getNextEntry: decodes each solid block once.
+            try (SevenZFile seq = SevenZFile.builder().setFile(file).get()) {
+                SevenZArchiveEntry ze;
+                int i = 0;
+                byte[] buf = new byte[1 << 16];
+                while ((ze = seq.getNextEntry()) != null) {
+                    Ent e = ents.get(i++);
+                    if (ze.isDirectory() || !ze.hasStream()) continue;
+                    OutputStream out = sink.open(e);
+                    if (out == null) continue;   // not read: getNextEntry skips it
+                    try (OutputStream o = out) {
+                        int n;
+                        while ((n = seq.read(buf)) > 0) o.write(buf, 0, n);
+                    }
+                }
+            }
+        }
+        @Override public boolean isZip() { return false; }
+        @Override public void close() throws IOException { sz.close(); }
+    }
+
+    private static final class RarArc implements Arc {
+        private final File file;
+        private final Archive rar;
+        private final List<FileHeader> hs;
+        private final List<Ent> ents = new ArrayList<>();
+
+        RarArc(File f) throws IOException {
+            file = f;
+            try {
+                rar = new Archive(f);
+            } catch (RarException e) {
+                throw new IOException("RAR: " + e.getMessage(), e);
+            }
+            boolean encrypted;
+            try {
+                encrypted = rar.isEncrypted();
+            } catch (RarException e) {
+                encrypted = true;
+            }
+            if (encrypted) {
+                closeQuietly(rar);
+                throw new Unsupported("password protected");
+            }
+            hs = rar.getFileHeaders();
+            for (int i = 0; i < hs.size(); i++) {
+                FileHeader h = hs.get(i);
+                ents.add(new Ent(h.getFileName(), h.getFullUnpackSize(), h.isDirectory(), i));
+            }
+        }
+        @Override public List<Ent> entries() { return ents; }
+
+        @Override public InputStream open(Ent e) throws IOException {
+            if (!rar.getMainHeader().isSolid()) return rarStream(rar, hs.get(e.index));
+            // Solid: every file before it has to be decoded first, on a fresh reader.
+            final Archive a;
+            try {
+                a = new Archive(file);
+            } catch (RarException ex) {
+                throw new IOException("RAR: " + ex.getMessage(), ex);
+            }
+            List<FileHeader> fresh = a.getFileHeaders();
+            OutputStream nul = new OutputStream() { @Override public void write(int b) {} @Override public void write(byte[] b, int o, int l) {} };
+            try {
+                for (int i = 0; i < e.index; i++)
+                    if (!fresh.get(i).isDirectory()) a.extractFile(fresh.get(i), nul);
+            } catch (RarException ex) {
+                closeQuietly(a);
+                throw new IOException("RAR: " + ex.getMessage(), ex);
+            }
+            return new FilterInputStream(rarStream(a, fresh.get(e.index))) {
+                @Override public void close() throws IOException { super.close(); closeQuietly(a); }
+            };
+        }
+
+        @Override public void each(Sink sink) throws IOException {
+            boolean solid = rar.getMainHeader().isSolid();
+            OutputStream nul = new OutputStream() { @Override public void write(int b) {} @Override public void write(byte[] b, int o, int l) {} };
+            try {
+                for (Ent e : ents) {
+                    FileHeader h = hs.get(e.index);
+                    if (h.isDirectory()) continue;
+                    OutputStream out = sink.open(e);
+                    if (out == null) {
+                        if (solid) rar.extractFile(h, nul);   // keeps the solid stream in step
+                        continue;
+                    }
+                    try (OutputStream o = out) { rar.extractFile(h, o); }
+                }
+            } catch (RarException ex) {
+                throw new IOException("RAR: " + ex.getMessage(), ex);
+            }
+        }
+        @Override public boolean isZip() { return false; }
+        @Override public void close() throws IOException { rar.close(); }
+
+        private static InputStream rarStream(Archive a, FileHeader h) throws IOException {
+            return a.getInputStream(h);
+        }
+    }
+
+    private static void closeQuietly(Closeable c) {
+        try { c.close(); } catch (IOException ignored) {}
+    }
+
+    // ---- disc identification (port of Pc_DetectRegionFromBin, main_pc.c)
+
+    private static boolean isSilentHill(String fileName, String boot) {
         if (boot == null) return false;
         for (String s : SH_SERIALS) if (boot.startsWith(s)) return true;
         return lower(fileName).contains("silent hill");
     }
 
-    /** Name of the SLUS/SLES/SLPM/SLPS/SIPS boot file in the ISO9660 root of a
-     *  raw (2352-byte sector) PSX image, or null when it is not one. */
-    private static String bootName(ByteSource src) {
-        try {
-            byte[] sec = new byte[2048];
-            if (src.readAt(16L * 2352 + 24, sec) != 2048) return null;
-            long rlba = (sec[158] & 0xFF) | (sec[159] & 0xFF) << 8 | (sec[160] & 0xFF) << 16
-                      | (long) (sec[161] & 0xFF) << 24;
-            if (src.readAt(rlba * 2352 + 24, sec) != 2048) return null;
-            for (int o = 0; o + 33 < 2048; ) {
-                int len = sec[o] & 0xFF, nl = sec[o + 32] & 0xFF;
-                if (len == 0) break;
-                if (o + 33 + nl <= 2048 && nl >= 4) {
-                    String name = new String(sec, o + 33, nl, StandardCharsets.US_ASCII);
-                    if (name.startsWith("SLUS") || name.startsWith("SLES") || name.startsWith("SLPM")
-                            || name.startsWith("SLPS") || name.startsWith("SIPS"))
-                        return name;
-                }
-                o += len;
-            }
+    private static String bootName(File f) {
+        try (InputStream in = new FileInputStream(f)) {
+            return bootName(in);
         } catch (IOException e) {
-            Log.w(TAG, "cannot read disc header", e);
+            return null;
+        }
+    }
+
+    /** Name of the SLUS/SLES/SLPM/SLPS/SIPS boot file in the ISO9660 root of a
+     *  raw (2352-byte sector) PSX image, or null when it is not one. Reads the
+     *  stream forward only (the root directory always comes after the PVD), so
+     *  it also works on a stream out of an archive. */
+    private static String bootName(InputStream in) throws IOException {
+        byte[] sec = new byte[2048];
+        long pos = 16L * 2352 + 24;
+        if (!skipFully(in, pos) || !readFully(in, sec)) return null;
+        pos += 2048;
+        long rlba = (sec[158] & 0xFF) | (sec[159] & 0xFF) << 8 | (sec[160] & 0xFF) << 16
+                  | (long) (sec[161] & 0xFF) << 24;
+        long at = rlba * 2352 + 24;
+        if (at < pos || !skipFully(in, at - pos) || !readFully(in, sec)) return null;
+        for (int o = 0; o + 33 < 2048; ) {
+            int len = sec[o] & 0xFF, nl = sec[o + 32] & 0xFF;
+            if (len == 0) break;
+            if (o + 33 + nl <= 2048 && nl >= 4) {
+                String name = new String(sec, o + 33, nl, StandardCharsets.US_ASCII);
+                if (name.startsWith("SLUS") || name.startsWith("SLES") || name.startsWith("SLPM")
+                        || name.startsWith("SLPS") || name.startsWith("SIPS"))
+                    return name;
+            }
+            o += len;
         }
         return null;
+    }
+
+    private static boolean skipFully(InputStream in, long n) throws IOException {
+        byte[] junk = null;
+        while (n > 0) {
+            long s = in.skip(n);
+            if (s <= 0) {
+                if (junk == null) junk = new byte[1 << 16];
+                int r = in.read(junk, 0, (int) Math.min(junk.length, n));
+                if (r < 0) return false;
+                s = r;
+            }
+            n -= s;
+        }
+        return true;
+    }
+
+    private static boolean readFully(InputStream in, byte[] b) throws IOException {
+        int got = 0, n;
+        while (got < b.length && (n = in.read(b, got, b.length - got)) > 0) got += n;
+        return got == b.length;
     }
 
     private static final Pattern CUE_FILE = Pattern.compile("FILE\\s+\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
@@ -389,6 +678,11 @@ final class DiscImport {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    private static String stripExt(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
     }
 
     private static String lower(String s) { return s.toLowerCase(Locale.ROOT); }

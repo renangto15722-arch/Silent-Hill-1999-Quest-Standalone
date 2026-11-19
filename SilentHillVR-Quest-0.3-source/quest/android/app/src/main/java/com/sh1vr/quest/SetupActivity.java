@@ -19,6 +19,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /** 2D panel shown instead of the game when it cannot start yet: no all-files
@@ -44,11 +45,23 @@ public class SetupActivity extends Activity {
         }
     }
 
+    /** Look in Download once, as soon as file access is there. After that only
+     *  the buttons do: the Quest resumes a panel over and over (several times a
+     *  second while it is shown), and every resume used to rescan Download. */
+    private boolean autoCheck = true;
+
     @Override
     protected void onResume() {
         super.onResume();
-        if (Environment.isExternalStorageManager() && !busy) startImport();
-        else if (!busy) showPermission();
+        if (busy) return;
+        if (!Environment.isExternalStorageManager()) {
+            showPermission();
+            return;
+        }
+        if (autoCheck) {
+            autoCheck = false;
+            startImport();
+        }
     }
 
     // ---- screens
@@ -65,17 +78,17 @@ public class SetupActivity extends Activity {
         primary.setEnabled(true);
     }
 
-    private void showNoDisc(int failed) {
+    private void showNoDisc(int failed, List<String> problems) {
         title.setText("No Silent Hill disc found");
         body.setText("1. Open the Quest browser and download your own Silent Hill disc image: "
-            + "the .bin file (and its .cue), or a .zip that has them.\n"
+            + "the .bin file (and its .cue), or a .zip / .7z / .rar that has them.\n"
             + "2. Come back here and press Check again. The game moves it from the "
             + "Download folder into place by itself.\n\n"
-            + "HD texture / HD maps packs (.zip) downloaded the same way are installed too.\n\n"
+            + "HD texture / HD maps packs (.zip / .7z / .rar) downloaded the same way are installed too.\n\n"
             + "You can also copy the files yourself to\n"
             + GameActivity.DATA_ROOT + "/gamedata");
         hideProgress();
-        if (failed > 0) status.setText(failed + " file(s) could not be installed. They are still in Download.");
+        status.setText(problemText(failed, problems));
         primary.setText("Check again");
         primary.setOnClickListener(v -> startImport());
         primary.setEnabled(true);
@@ -95,16 +108,15 @@ public class SetupActivity extends Activity {
         final File root = new File(GameActivity.DATA_ROOT);
         new Thread(() -> {
             int failed = 0;
+            List<String> problems = new ArrayList<>();
             boolean disc = false;
             try {
-                List<DiscImport.Job> jobs = DiscImport.plan(root);
-                Log.i(TAG, "setup: " + jobs.size() + " file(s) to import: " + jobs);
-                if (!jobs.isEmpty()) {
-                    failed = DiscImport.run(root, jobs, (what, pct) -> ui.post(() -> {
-                        body.setText(what);
-                        bar.setProgress(pct);
-                    }));
-                }
+                DiscImport.Result r = DiscImport.importAll(root, (what, pct) -> ui.post(() -> {
+                    body.setText(what);
+                    bar.setProgress(pct);
+                }));
+                failed = r.failed;
+                problems.addAll(r.problems);
                 disc = DiscImport.hasDisc(new File(root, "gamedata"));
             } catch (Exception e) {
                 Log.e(TAG, "setup failed", e);
@@ -114,19 +126,28 @@ public class SetupActivity extends Activity {
             final boolean ok = disc;
             ui.post(() -> {
                 busy = false;
-                if (ok && f == 0) startGame();
+                if (ok && f == 0 && problems.isEmpty()) startGame();
                 else if (ok) {
-                    // The disc is there; say what failed, then let them go on.
+                    // The disc is there; say what could not be used, then let them go on.
                     title.setText("Almost ready");
-                    body.setText(f + " file(s) could not be installed and are still in Download. "
-                        + "The game can start without them.");
+                    body.setText("The game can start. Some files in Download could not be used:");
+                    status.setText(problemText(f, problems));
                     hideProgress();
                     primary.setText("Start the game");
                     primary.setOnClickListener(v -> startGame());
                     primary.setEnabled(true);
-                } else showNoDisc(f);
+                } else showNoDisc(f, problems);
             });
         }, "SetupImport").start();
+    }
+
+    private static String problemText(int failed, List<String> problems) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : problems) sb.append("- ").append(p).append('\n');
+        if (failed > 0)
+            sb.append(failed).append(" file(s) could not be installed (see SilentHillVR.log). ")
+              .append("They are still in Download.");
+        return sb.toString().trim();
     }
 
     private void startGame() {

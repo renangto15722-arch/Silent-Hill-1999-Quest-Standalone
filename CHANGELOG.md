@@ -4,10 +4,11 @@
 
 ### New
 - **Install without a PC.** Download the APK, your disc and the HD packs with the Quest browser, install the APK from the Files app and start the game: it moves everything from the *Download* folder into place by itself.
-  - Disc: `.bin` + `.cue`, or a `.zip` that has them (any file name; the disc is recognised by its boot file).
-  - HD textures `.zip` → `texturemods` (kept zipped). HD maps / menus `.zip` (`TIM`, `1ST`, `ITEM`...) → unpacked into `load`.
+  - Disc: `.bin` + `.cue`, or a `.zip`, `.7z` or `.rar` that has them, also one archive inside another (any file name; the disc is recognised by its boot file).
+  - HD textures: `.zip` → `texturemods` (kept zipped); `.7z` / `.rar` → unpacked into `texturemods`. HD maps / menus (`TIM`, `1ST`, `ITEM`...) in any of the three → unpacked into `load`.
+  - RAR5 and password-protected archives cannot be read; the panel says which file and why.
   - Nothing already installed is overwritten; files it does not recognise stay in *Download*.
-- **Setup panel** before the game when it cannot start yet: asks for "All files access" and goes on by itself once it is on (no more starting the game twice), shows progress while it installs, and explains how to get the disc when there is none.
+- **Setup panel** before the game when it cannot start yet: asks for "All files access" and goes on by itself once it is on (no more starting the game twice), shows progress while it installs, lists the files it could not use, and explains how to get the disc when there is none.
 
 ### Fixed
 - **Gun aim and weapon positions on a fresh install.** The default settings in 0.2 carried old aim values that overrode the per-weapon tuning: every gun shot off target and the handgun sat crooked. New installs now get the tuned aim for each gun and the tuned position of every weapon (kitchen knife included).

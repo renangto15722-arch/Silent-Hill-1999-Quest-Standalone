@@ -66,9 +66,10 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 
 1. Turn on **Developer Mode**: in the Meta Horizon phone app, *Devices → your headset → Headset settings → Developer Mode* (it asks for a free Meta developer account once).
 2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.3.apk`](SilentHillVR-Quest-0.3.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
-3. With the Quest browser, download your own disc (`.bin` + `.cue`, or a `.zip` that has them). *(Optional)* Download the HD textures `.zip` and the HD maps (as a `.zip`) the same way. They all land in the *Download* folder.
+3. With the Quest browser, download your own disc (`.bin` + `.cue`, or a `.zip` / `.7z` / `.rar` that has them). *(Optional)* Download the HD textures and the HD maps the same way (`.zip`, `.7z` or `.rar`). They all land in the *Download* folder; no need to unpack anything.
 4. Start the game: **Library → Unknown Sources**. Allow **"All files access"** when the panel asks, then come back.
-   The game moves the disc and the HD packs from *Download* into place by itself, then starts.
+   The game unpacks the disc and the HD packs from *Download* into place by itself, then starts.
+   RAR5 and password-protected archives cannot be read: the panel tells you which file it could not use.
 
 > [!NOTE]
 > If the Files app will not install the APK on your Quest, install it from an Android phone with a USB cable (the **Bugjaeger** app) or from a PC (below). Steps 3 and 4 stay the same.

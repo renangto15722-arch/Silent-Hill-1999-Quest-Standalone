@@ -104,6 +104,11 @@ android {
 
 dependencies {
     // Khronos OpenXR loader for Android: prebuilt in src/main/jniLibs (the game dlopens it).
+
+    // DiscImport: discs and HD packs downloaded as .7z / .rar (pure Java).
+    implementation 'org.apache.commons:commons-compress:1.27.1'
+    implementation 'org.tukaani:xz:1.10'              // LZMA / LZMA2 inside .7z
+    implementation 'com.github.junrar:junrar:7.5.5'   // RAR up to v4 (no RAR5)
 }
 
 // Bundled game data (assets/shdata): the port's own gamedata files and
