@@ -57,5 +57,17 @@
                 <category android:name="com.oculus.intent.category.VR" />
             </intent-filter>
         </activity>
+
+        <!-- 2D panel: all-files access, importing what the player downloaded
+             (disc, HD packs) from /sdcard/Download, "no disc" help. Own
+             process: GameActivity kills its process when it closes. -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="false"
+            android:process=":setup"
+            android:taskAffinity="com.sh1vr.quest.setup"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:excludeFromRecents="true"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode" />
     </application>
 </manifest>

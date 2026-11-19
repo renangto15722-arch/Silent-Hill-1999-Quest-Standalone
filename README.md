@@ -62,6 +62,17 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 > [!TIP]
 > The `SilentHillVR` folder appears after the game's first start. `Install-SilentHillVR.bat` creates it and copies everything for you.
 
+## 🥽 Install without a PC — Quest only
+
+1. Turn on **Developer Mode**: in the Meta Horizon phone app, *Devices → your headset → Headset settings → Developer Mode* (it asks for a free Meta developer account once).
+2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.2.apk`](SilentHillVR-Quest-0.2.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
+3. With the Quest browser, download your own disc (`.bin` + `.cue`, or a `.zip` that has them). *(Optional)* Download the HD textures `.zip` and the HD maps (as a `.zip`) the same way. They all land in the *Download* folder.
+4. Start the game: **Library → Unknown Sources**. Allow **"All files access"** when the panel asks, then come back.
+   The game moves the disc and the HD packs from *Download* into place by itself, then starts.
+
+> [!NOTE]
+> If the Files app will not install the APK on your Quest, install it from an Android phone with a USB cable (the **Bugjaeger** app) or from a PC (below). Steps 3 and 4 stay the same.
+
 ## ⚡ Easy install — Windows PC + USB cable
 
 1. *(Optional)* Put `Silent Hill (USA).bin` and `.cue` next to `Install-SilentHillVR.bat` (or in a folder named `disc`), the HD texture pack `.zip` in a folder named `texturemods`, and the HD maps' files in a folder named `load`.
@@ -76,7 +87,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 
 1. Install `SilentHillVR-Quest-0.2.apk` with SideQuest (or `adb install`).
 2. Start the game on the Quest (**Library → Unknown Sources**).
-   The first time, a panel asks for **"All files access"**: turn it on and start the game again.
+   The first time, a panel asks for **"All files access"**: turn it on and come back; the game goes on by itself.
    The game then creates `/sdcard/SilentHillVR` with everything it needs.
 3. With the Quest connected to the PC, put your disc's `.bin` and `.cue` in:
    ```

@@ -19,8 +19,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /** The immersive game: SDL's activity running libmain.so (SDL_main), which
- *  starts OpenXR itself. Data dir: /sdcard/SilentHillVR (all-files access),
- *  else getExternalFilesDir(null). */
+ *  starts OpenXR itself. Data dir: /sdcard/SilentHillVR (all-files access;
+ *  SetupActivity gets it, imports downloads and checks for the disc first). */
 public class GameActivity extends SDLActivity {
     private static final String TAG = "SilentHillVR";
 
@@ -41,24 +41,21 @@ public class GameActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        File root;
-        if (Environment.isExternalStorageManager()) {
-            root = new File(DATA_ROOT);
-            Log.i(TAG, "data dir: " + DATA_ROOT);
-        } else {
-            // No all-files access yet: ask once (a 2D system panel). The game
-            // falls back to the app's own files dir until it is granted.
-            Log.w(TAG, "no all-files access; data falls back to " + getExternalFilesDir(null));
-            try {
-                Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                      Uri.parse("package:" + getPackageName()));
-                startActivity(i);
-            } catch (Exception e) {
-                Log.w(TAG, "cannot open the all-files access panel", e);
-            }
-            root = getExternalFilesDir(null);
+        File root = new File(DATA_ROOT);
+        // Not ready to play (no all-files access, downloads waiting to be
+        // imported, or no disc): the 2D setup panel handles it and starts the
+        // game again when done. SDLActivity still needs its onCreate; finishing
+        // here goes straight to onDestroy, before SDL_main ever runs.
+        if (!Environment.isExternalStorageManager() || DiscImport.needsSetup(root)) {
+            Log.i(TAG, "not ready to play; opening setup");
+            startActivity(new Intent(this, SetupActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            super.onCreate(savedInstanceState);
+            finish();
+            return;
         }
-        if (root != null) installData(root);
+        Log.i(TAG, "data dir: " + DATA_ROOT);
+        installData(root);
         super.onCreate(savedInstanceState);
     }
 
