@@ -9,6 +9,11 @@
   - Nothing already installed is overwritten; files it does not recognise stay in *Download*.
 - **Setup panel** before the game when it cannot start yet: asks for "All files access" and goes on by itself once it is on (no more starting the game twice), shows progress while it installs, and explains how to get the disc when there is none.
 
+### Fixed
+- **Gun aim and weapon positions on a fresh install.** The default settings in 0.2 carried old aim values that overrode the per-weapon tuning: every gun shot off target and the handgun sat crooked. New installs now get the tuned aim for each gun and the tuned position of every weapon (kitchen knife included).
+- New default settings (tuned on the Quest 3).
+- *Already installed 0.2 or 0.3 before this fix?* Your `config.cfg` keeps the old values. Delete `/sdcard/SilentHillVR/config.cfg` (your saves are not in it) and start the game to get the new defaults.
+
 ## 0.2
 
 ### New

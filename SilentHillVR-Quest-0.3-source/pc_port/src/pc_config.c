@@ -217,13 +217,13 @@ s_PcConfig g_PcConfig = {
     .vrEyeRes            = 100.0f, /* eye images at the window's resolution */
     .vrWeaponSize        = 140.0f, /* weapons 40% bigger than the models they replace (tuned 17/11/2026) */
     /* per weapon; -1 = not in the config, filled from vr_weapon_size after load */
-    .vrGripScale         = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 200.0f, -1.0f },   /* shotgun 200% (tuned 17/11/2026) */
+    .vrGripScale         = { 160.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 200.0f, -1.0f },   /* knife 160% (Renan 19/11/2026), shotgun 200% (tuned 17/11/2026) */
     /* Default weapon placement in the hand (VR_Objects), tuned on the Quest 3
      * 17/11/2026. Per row: forward (Z), up (Y), right (X) cm, then pitch (X),
      * yaw (Y), roll (Z) deg; PcConfig_GripSlot order. A vr_grip_<id> line in
      * config.cfg overrides its row. */
     .vrGrip = {
-        {  -7.5f,   2.5f, -3.5f,   0.0f, 65.0f,   0.0f },   /* 128 kitchen knife */
+        {  -8.0f,   4.0f, -1.0f,   0.0f,  0.0f,   0.0f },   /* 128 kitchen knife (Renan 19/11/2026) */
         { -16.5f,  -6.0f,  0.0f,  50.0f,  0.0f,   0.0f },   /* 129 steel pipe    */
         {   5.0f,  10.0f, -2.0f,   0.0f,  0.0f,   0.0f },   /* 130 rock drill    */
         {   0.0f,   0.0f,  0.0f,   0.0f,  0.0f,   0.0f },   /* 131 (none)        */
