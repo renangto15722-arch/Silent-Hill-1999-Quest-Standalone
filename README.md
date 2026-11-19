@@ -7,7 +7,7 @@
 
 ![Status](https://img.shields.io/badge/status-work%20in%20progress-orange)
 ![Platform](https://img.shields.io/badge/platform-Meta%20Quest%203-1c1e21)
-![Version](https://img.shields.io/badge/version-0.2-blue)
+![Version](https://img.shields.io/badge/version-0.3-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
 </div>
@@ -34,10 +34,10 @@
 
 | File | |
 |---|---|
-| [`SilentHillVR-Quest-0.2.apk`](SilentHillVR-Quest-0.2.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
+| [`SilentHillVR-Quest-0.3.apk`](SilentHillVR-Quest-0.3.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
 | [`Install-SilentHillVR.bat`](Install-SilentHillVR.bat) | Installs it from a Windows PC over USB. |
 | [`InstallSH-Quest.bat`](InstallSH-Quest.bat) | Same, drag & drop: installs or updates the game, then copies whatever you drag into its window (disc, HD textures, HD maps). |
-| [`SilentHillVR-Quest-0.2-source/`](SilentHillVR-Quest-0.2-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.2-source/quest/README.md) |
+| [`SilentHillVR-Quest-0.3-source/`](SilentHillVR-Quest-0.3-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.3-source/quest/README.md) |
 
 ## 💿 What you need
 
@@ -65,7 +65,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 ## 🥽 Install without a PC — Quest only
 
 1. Turn on **Developer Mode**: in the Meta Horizon phone app, *Devices → your headset → Headset settings → Developer Mode* (it asks for a free Meta developer account once).
-2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.2.apk`](SilentHillVR-Quest-0.2.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
+2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.3.apk`](SilentHillVR-Quest-0.3.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
 3. With the Quest browser, download your own disc (`.bin` + `.cue`, or a `.zip` that has them). *(Optional)* Download the HD textures `.zip` and the HD maps (as a `.zip`) the same way. They all land in the *Download* folder.
 4. Start the game: **Library → Unknown Sources**. Allow **"All files access"** when the panel asks, then come back.
    The game moves the disc and the HD packs from *Download* into place by itself, then starts.
@@ -85,7 +85,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 <details>
 <summary><b>🛠️ Manual installation</b></summary>
 
-1. Install `SilentHillVR-Quest-0.2.apk` with SideQuest (or `adb install`).
+1. Install `SilentHillVR-Quest-0.3.apk` with SideQuest (or `adb install`).
 2. Start the game on the Quest (**Library → Unknown Sources**).
    The first time, a panel asks for **"All files access"**: turn it on and come back; the game goes on by itself.
    The game then creates `/sdcard/SilentHillVR` with everything it needs.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3
+
+### New
+- **Install without a PC.** Download the APK, your disc and the HD packs with the Quest browser, install the APK from the Files app and start the game: it moves everything from the *Download* folder into place by itself.
+  - Disc: `.bin` + `.cue`, or a `.zip` that has them (any file name; the disc is recognised by its boot file).
+  - HD textures `.zip` → `texturemods` (kept zipped). HD maps / menus `.zip` (`TIM`, `1ST`, `ITEM`...) → unpacked into `load`.
+  - Nothing already installed is overwritten; files it does not recognise stay in *Download*.
+- **Setup panel** before the game when it cannot start yet: asks for "All files access" and goes on by itself once it is on (no more starting the game twice), shows progress while it installs, and explains how to get the disc when there is none.
+
 ## 0.2
 
 ### New
