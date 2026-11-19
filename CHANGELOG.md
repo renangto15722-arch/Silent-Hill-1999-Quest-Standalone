@@ -14,7 +14,7 @@
 ### Fixed
 - **Gun aim and weapon positions on a fresh install.** The default settings in 0.2 carried old aim values that overrode the per-weapon tuning: every gun shot off target and the handgun sat crooked. New installs now get the tuned aim for each gun and the tuned position of every weapon (kitchen knife included).
 - New default settings (tuned on the Quest 3).
-- *Already installed 0.2 or 0.3 before this fix?* Your `config.cfg` keeps the old values. Delete `/sdcard/SilentHillVR/config.cfg` (your saves are not in it) and start the game to get the new defaults.
+- *Updating from 0.2 or an earlier 0.3?* The old default `config.cfg` (the one with the wrong aim) is replaced automatically and kept as `config.cfg.bak`. A config you tuned yourself and your saves are left alone.
 
 ## 0.2
 

@@ -55,6 +55,9 @@ public class GameActivity extends SDLActivity {
             return;
         }
         Log.i(TAG, "data dir: " + DATA_ROOT);
+        // Before the game reads config.cfg: swap out the old default one
+        // (wrong gun aim) for the current default. Saves are not in it.
+        ConfigFix.run(root, () -> getAssets().open(ASSET_ROOT + "/config.cfg"));
         installData(root);
         super.onCreate(savedInstanceState);
     }
