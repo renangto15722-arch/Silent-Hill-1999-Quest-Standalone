@@ -633,6 +633,8 @@ static const s_PcOpt PCOPT_VH[] = {
     { "Training_Dummy",    &g_PcConfig.vrTrainingDummy,    "vr_training_dummy",     VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
     /* vr_melee.c: see the melee hit volumes and the enemies' bodies */
     { "Show_Hitboxes",     &g_PcConfig.vrShowHitboxes,     "vr_show_hitboxes",      VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
+    /* vr_melee.c: the shortest time between two damaging swings */
+    { "Melee_Cooldown_ms",     NULL, "vr_melee_cooldown_ms", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrMeleeCooldownMs, NULL, 0.0f, 2000.0f, 50.0f },
     /* vr_melee.c: a motor weapon kept in an enemy cuts once per interval */
     { "Chainsaw_Hit_Every_ms", NULL, "vr_saw_hit_ms",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrSawHitMs,       NULL, 100.0f, 1000.0f, 50.0f },
     { "Drill_Hit_Every_ms",    NULL, "vr_drill_hit_ms",   NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrDrillHitMs,     NULL, 100.0f, 1000.0f, 50.0f },

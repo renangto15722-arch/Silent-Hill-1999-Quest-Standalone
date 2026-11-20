@@ -127,6 +127,7 @@ static Uint32 s_swingT0;
 static float  s_arc, s_slowMs, s_dir[3];
 static u32    s_hitMask;                   /* enemies hit (or touched) by this swing */
 static Uint32 s_nextSwingMs;               /* recovery: no new swing before */
+static Uint32 s_lastHitMs;                 /* the last damaging hit (Melee_Cooldown_ms) */
 
 /* per enemy */
 static u8     s_latched[VR_MELEE_TARGETS]; /* in the body since the last contact */
@@ -536,7 +537,10 @@ void VrMelee_Update(void)
                                : !s_swing ? "not a swing"
                                : swingMs < w->minMs ? "swing too short"
                                : s_arc < w->arcMin ? "arc too small"
-                               : v < w->vMin ? "too slow" : NULL;
+                               : v < w->vMin ? "too slow"
+                               /* Melee_Cooldown_ms: no damage this soon after the last one */
+                               : (s_lastHitMs != 0 && (float)(ms - s_lastHitMs) < g_PcConfig.vrMeleeCooldownMs) ? "cooldown"
+                               : NULL;
             float speedEff, arcEff, factor;
 
             if (why && s_swing && v >= w->vMin && (swingMs < w->minMs || s_arc < w->arcMin))
@@ -565,6 +569,7 @@ void VrMelee_Update(void)
             arcEff   = (arcEff < 0.0f) ? 0.0f : (arcEff > 1.0f) ? 1.0f : arcEff;
             factor   = VR_MELEE_MIN_FACTOR + (1.0f - VR_MELEE_MIN_FACTOR) * speedEff * (0.6f + 0.4f * arcEff);
             s_nextSwingMs = ms + (Uint32)w->recoverMs;
+            s_lastHitMs   = ms;
             {
                 const q19_12 before = t->damage.amount;
                 Strike(t, at, dir, wid, factor);

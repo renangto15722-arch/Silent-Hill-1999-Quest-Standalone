@@ -403,6 +403,7 @@ typedef struct {
     int   vrWeaponSelect;   /* VR: how weapons are taken: 0 = holsters on the body, 1 = weapon wheel on the right grip (vr_weapon_select) */
     int   vrTrainingDummy;  /* VR: the first enemy that comes close is frozen, cannot die and shows each hit's damage (vr_training_dummy) */
     int   vrShowHitboxes;   /* VR: draw the melee weapon's hit spheres / box and the enemies' bodies (vr_show_hitboxes) */
+    float vrMeleeCooldownMs; /* VR: melee weapons - no damage this soon after the last damaging hit, ms (vr_melee_cooldown_ms) */
     float vrSawHitMs;       /* VR: chainsaw - time between two cuts while it stays in an enemy, ms (vr_saw_hit_ms) */
     float vrDrillHitMs;     /* VR: rock drill - the same, ms (vr_drill_hit_ms) */
     float vrBoxSize;        /* VR: edge of the visible grab box of a holster / wheel slot, cm, 8..30 (vr_hbox_size) */

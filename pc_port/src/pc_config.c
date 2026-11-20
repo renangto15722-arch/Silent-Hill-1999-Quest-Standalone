@@ -256,6 +256,7 @@ s_PcConfig g_PcConfig = {
     .vrBoxSize           = 16.0f,  /* cm */
     .vrTrainingDummy     = 0,
     .vrShowHitboxes      = 0,
+    .vrMeleeCooldownMs   = 500.0f,
     .vrSawHitMs          = 500.0f,
     .vrDrillHitMs        = 600.0f,
     .vrBoxOpacity        = 30.0f,  /* % */
@@ -1412,6 +1413,11 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_training_dummy") == 0)
         {
             g_PcConfig.vrTrainingDummy = atoi(value) != 0;
+        }
+        else if (strcmp(key, "vr_melee_cooldown_ms") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrMeleeCooldownMs = (v < 0.0f) ? 0.0f : (v > 2000.0f) ? 2000.0f : v;
         }
         else if (strcmp(key, "vr_saw_hit_ms") == 0 || strcmp(key, "vr_drill_hit_ms") == 0)
         {
