@@ -100,11 +100,14 @@ typedef struct
  * than the pipe. (Reach itself is the model's real length.) */
 static const s_VrMelee s_melee[] = {
     /* item                   motor reach from  radius vMin vFull arcMin arcFull minMs recover */
-    { InvItemId_KitchenKnife, 0,    0.22f, 0.45f, 0.035f, 1.0f, 2.6f, 0.06f, 0.20f,  30.0f, 120.0f },
-    { InvItemId_SteelPipe,    0,    0.65f, 0.40f, 0.040f, 1.8f, 4.2f, 0.20f, 0.50f,  80.0f, 350.0f },
-    { InvItemId_Hammer,       0,    0.50f, 0.75f, 0.060f, 2.2f, 4.8f, 0.30f, 0.70f, 110.0f, 550.0f },
-    { InvItemId_Axe,          0,    0.65f, 0.70f, 0.060f, 2.2f, 4.8f, 0.30f, 0.70f, 110.0f, 550.0f },
-    { InvItemId_Katana,       0,    0.90f, 0.30f, 0.035f, 1.7f, 4.4f, 0.18f, 0.50f,  60.0f, 250.0f },
+    /* calibrated on the headset 20/11: real swings put the tip at 15-40 m/s
+     * over 1.5-4 m, so a medium swing is medium damage and only a hard, wide
+     * one reaches the game's full damage */
+    { InvItemId_KitchenKnife, 0,    0.22f, 0.45f, 0.035f, 3.0f,  9.0f, 0.10f, 0.40f,  30.0f, 120.0f },
+    { InvItemId_SteelPipe,    0,    0.65f, 0.40f, 0.040f, 6.0f, 18.0f, 0.40f, 1.20f,  80.0f, 350.0f },
+    { InvItemId_Hammer,       0,    0.50f, 0.75f, 0.060f, 8.0f, 22.0f, 0.50f, 1.50f, 110.0f, 550.0f },
+    { InvItemId_Axe,          0,    0.65f, 0.70f, 0.060f, 8.0f, 22.0f, 0.50f, 1.50f, 110.0f, 550.0f },
+    { InvItemId_Katana,       0,    0.90f, 0.30f, 0.035f, 5.0f, 16.0f, 0.35f, 1.10f,  60.0f, 250.0f },
     { InvItemId_Chainsaw,     1,    0.60f, 0.35f, 0.070f, 0.0f, 0.0f, 0.00f, 0.00f,   0.0f,   0.0f },
     { InvItemId_RockDrill,    1,    0.55f, 0.45f, 0.050f, 0.0f, 0.0f, 0.00f, 0.00f,   0.0f,   0.0f },
 };
@@ -127,6 +130,7 @@ static Uint32 s_nextSwingMs;               /* recovery: no new swing before */
 
 /* per enemy */
 static u8     s_latched[VR_MELEE_TARGETS]; /* in the body since the last contact */
+static u8     s_pending[VR_MELEE_TARGETS]; /* in the body, fast, swing still too young: judged again */
 static Uint32 s_lastCutMs[VR_MELEE_TARGETS];
 
 static int    s_inStrike;                  /* our own func_8008B714 call */
@@ -145,6 +149,7 @@ static void ResetAll(void)
     s_swing     = 0;
     s_hitMask   = 0;
     memset(s_latched, 0, sizeof(s_latched));
+    memset(s_pending, 0, sizeof(s_pending));
 }
 
 /* bodyprog_combat func_8008B714: a hit by Harry on an enemy that did not come
@@ -486,15 +491,16 @@ void VrMelee_Update(void)
             continue;
         }
 
-        /* swung: entering the body, once per swing */
-        if (s_latched[i] || (s_hitMask & (1u << i)))
+        /* swung: entering the body, once per swing. A contact that is fast
+         * enough but whose swing has only just begun (time / arc not yet
+         * reached) stays PENDING and is judged again the next frames while
+         * the weapon is still in; anything else is decided at once. */
+        if ((s_latched[i] && !s_pending[i]) || (s_hitMask & (1u << i)))
         {
             s_latched[i] = 1;
             continue;
         }
         s_latched[i] = 1;
-        if (s_swing)
-            s_hitMask |= 1u << i;
         {
             const float v      = (speed > s_prevSpeed) ? speed : s_prevSpeed;
             const float swingMs = s_swing ? (float)(ms - s_swingT0) : 0.0f;
@@ -505,6 +511,14 @@ void VrMelee_Update(void)
                                : v < w->vMin ? "too slow" : NULL;
             float speedEff, arcEff, factor;
 
+            if (why && s_swing && v >= w->vMin && (swingMs < w->minMs || s_arc < w->arcMin))
+            {
+                s_pending[i] = 1;   /* fast, just started: look again next frame */
+                continue;
+            }
+            s_pending[i] = 0;
+            if (s_swing)
+                s_hitMask |= 1u << i;
             if (why)
             {
                 VrOvr_Log("[VR-MELEE] touch: weapon %d on chara %d - %s (%.2f m/s, arc %.2f m, %.0f ms)\n",
@@ -531,7 +545,7 @@ void VrMelee_Update(void)
 
     /* out of a body: that enemy can be hit again */
     for (i = 0; i < VR_MELEE_TARGETS; i++)
-        if (!inside[i]) s_latched[i] = 0;
+        if (!inside[i]) s_latched[i] = s_pending[i] = 0;
 
     for (k = 0; k < 3; k++)
     {
