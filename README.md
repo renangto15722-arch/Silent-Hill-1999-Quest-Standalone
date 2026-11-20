@@ -7,7 +7,7 @@
 
 ![Status](https://img.shields.io/badge/status-work%20in%20progress-orange)
 ![Platform](https://img.shields.io/badge/platform-Meta%20Quest%203-1c1e21)
-![Version](https://img.shields.io/badge/version-0.3-blue)
+![Version](https://img.shields.io/badge/version-0.4-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
 </div>
@@ -27,6 +27,8 @@
 | 🎯 **Weapon wheel** | Optional instead of the holsters: hold the right grip, reach for a weapon, release |
 | ✋ **Both hands** | Any weapon in either hand; guns aim and fire from the hand that holds them |
 | 🔴 **Laser sight** | The shot goes where the laser points |
+| 🪓 **Physical melee** | Knife, pipe, hammer, axe and katana hit with your real swing: a weak swing does little, a strong one does full damage. Chainsaw and drill cut while the trigger is held |
+| 💀 **Combat difficulty** | Normal, Hard or Silent Hell: faster monsters that recover sooner after a hit |
 | ⚡ **~72 fps** | Optimized for the Quest 3, with sharper eye images |
 | 🧱 **Improved PGXP** | Steadier geometry and textures, less PS1 wobble |
 
@@ -34,10 +36,10 @@
 
 | File | |
 |---|---|
-| [`SilentHillVR-Quest-0.3.apk`](SilentHillVR-Quest-0.3.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
+| [`SilentHillVR-Quest-0.4.apk`](SilentHillVR-Quest-0.4.apk) | The game (`com.sh1vr.quest`). Everything it needs is inside; only the disc is yours to add. |
 | [`Install-SilentHillVR.bat`](Install-SilentHillVR.bat) | Installs it from a Windows PC over USB. |
 | [`InstallSH-Quest.bat`](InstallSH-Quest.bat) | Same, drag & drop: installs or updates the game, then copies whatever you drag into its window (disc, HD textures, HD maps). |
-| [`SilentHillVR-Quest-0.3-source/`](SilentHillVR-Quest-0.3-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.3-source/quest/README.md) |
+| [`SilentHillVR-Quest-0.4-source/`](SilentHillVR-Quest-0.4-source) | Full source code. APK build instructions: [`quest/README.md`](SilentHillVR-Quest-0.4-source/quest/README.md) |
 
 ## 💿 What you need
 
@@ -65,7 +67,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 ## 🥽 Install without a PC — Quest only
 
 1. Turn on **Developer Mode**: in the Meta Horizon phone app, *Devices → your headset → Headset settings → Developer Mode* (it asks for a free Meta developer account once).
-2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.3.apk`](SilentHillVR-Quest-0.3.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
+2. In the **Quest browser**, open this page and download [`SilentHillVR-Quest-0.4.apk`](SilentHillVR-Quest-0.4.apk). Open the Quest's **Files** app → *Downloads*, tap the APK and install it.
 3. With the Quest browser, download your own disc (`.bin` + `.cue`, or a `.zip` / `.7z` / `.rar` that has them). *(Optional)* Download the HD textures and the HD maps the same way (`.zip`, `.7z` or `.rar`). They all land in the *Download* folder; no need to unpack anything. Already unpacked them with the Files app? Folders inside *Download* (up to 3 levels) are found too.
 4. Start the game: **Library → Unknown Sources**. Allow **"All files access"** when the panel asks, then come back.
    The game unpacks the disc and the HD packs from *Download* into place by itself, then starts.
@@ -86,7 +88,7 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 <details>
 <summary><b>🛠️ Manual installation</b></summary>
 
-1. Install `SilentHillVR-Quest-0.3.apk` with SideQuest (or `adb install`).
+1. Install `SilentHillVR-Quest-0.4.apk` with SideQuest (or `adb install`).
 2. Start the game on the Quest (**Library → Unknown Sources**).
    The first time, a panel asks for **"All files access"**: turn it on and come back; the game goes on by itself.
    The game then creates `/sdcard/SilentHillVR` with everything it needs.
@@ -115,7 +117,8 @@ Everything lives in **`/sdcard/SilentHillVR/gamedata/`** on the Quest. From a PC
 | **Y** (hold) | PC options (VR, VR_Tuning, VR_Comfort… pages) |
 | **A** (hold 2 s) | Wheel with healing items and the map |
 | **Grip** near hip / chest / shoulder | Draw or holster the weapon |
-| **Trigger** | Shoot / attack |
+| **Trigger** | Shoot / run the chainsaw or drill |
+| **Swing** the weapon | Melee attack (knife, pipe, hammer, axe, katana) |
 
 > [!NOTE]
 > Saves and logs live in `/sdcard/SilentHillVR`; uninstalling the app keeps them.

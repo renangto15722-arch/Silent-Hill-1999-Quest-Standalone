@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4
+
+### New
+- **Physical melee combat.** The knife, steel pipe, hammer, axe and katana now hit only with your real swing — no button.
+  - A weak swing does little damage, a strong and wide one does the weapon's full damage. Just touching an enemy, pushing it or shaking the weapon does nothing.
+  - Each weapon feels different: the knife is quick and light, the pipe needs more force, the hammer and the axe are the heaviest, the katana is fast.
+  - One hit per swing. `Melee_Cooldown_ms` sets the shortest time between two hits.
+  - The damage always comes from the original game, never more than its own maximum.
+- **Chainsaw and rock drill** cut while you hold the trigger and the blade is in the enemy, once every interval (`Chainsaw_Hit_Every_ms`, `Drill_Hit_Every_ms`).
+- **Combat difficulty**: *Normal* (the original game), *Hard* and *Silent Hell*. Monsters move faster and recover sooner after being hit. Can be changed at any time. The damage you take still follows the game's own Easy / Normal / Hard.
+- **Training dummy** (`Training_Dummy`): the first monster in the room is brought in front of you, stands still, cannot die and shows the damage of every hit on screen. Good for trying the weapons.
+- **Show hitboxes** (`Show_Hitboxes`): shows where each weapon hits and the enemies' bodies.
+- **New `VR_Combat` page** in the PC options with all the combat settings.
+- **Restore defaults** for each weapon on the `VR_Objects` page.
+- The `VR_Holsters` page only shows the options of the mode you chose (holsters or weapon wheel).
+
+### Fixed
+- The gun flash, smoke and sparks now come out of the weapon in your hand, for every weapon.
+- Weapons are no longer shown in Harry's hand during cutscenes.
+- Holding the Quest button to recenter no longer leaves the view close to the floor.
+- The piano puzzle screen (and other picture screens) no longer go black when they change.
+- The flashlight beam glow that covered the view in VR was removed.
+- New option `Flashlight_On_Head`: the flashlight points where you look.
+- Option names no longer cover their values.
+
+### Performance (Quest 3)
+- Smoother in busy places like the café: about 13% less work per frame and almost no stutter frames (from 25–35 to 1–4 every few seconds).
+
 ## 0.3
 
 ### New

@@ -80,7 +80,28 @@ extern "C" unsigned PGXP_CurGen(void) { return s_pgxpGen; }
 /* Shadow entry: precise projection of the word at `key`. value = the packed
  * integer (s16 x | s16 y<<16) that lives at key; a draw that reused the address
  * with a different value falls to affine. */
-struct ShadowEntry { uintptr_t key; unsigned gen; unsigned value; float x, y, w; };
+/* ONE table for both shadows (perf, Quest): the PGXP screen projection and the
+ * view-space data of a vertex word live in the same 64-byte entry - one cache
+ * line - under one key. They used to be two parallel tables (64 + 96 MB) with
+ * the same hash, so every Shadow_Copy cost four random memory accesses (get +
+ * put in each); now it costs two, and a vertex's draw-time fetch of both
+ * halves one. Each half keeps its own generation and value, so the two stay
+ * exactly as independent as before: a half is valid only if its gen is this
+ * frame's (gen 0 = never written; s_pgxpGen starts at 1).
+ * nocast / fade are the 0/1 flags they always are (world_draw.c), as bytes. */
+struct alignas(64) ShadowEntry {
+	uintptr_t key;
+	unsigned  gen, value;          /* PGXP half */
+	unsigned  vgen, vvalue;        /* view-space half */
+	float     x, y, w;             /* PGXP: precise screen x/y, view W */
+	float     vx, vy, vz;          /* view-space position */
+	float     ofx, ofy, h;         /* GTE projection when it was transformed */
+	unsigned char nc, fd, pad[2];  /* nocast, fade (0/1) */
+};
+typedef ShadowEntry VsEntry;
+static_assert(sizeof(ShadowEntry) == 64, "one cache line");
+#define VS_NOCAST(e) ((float)(e)->nc)
+#define VS_FADE(e)   ((float)(e)->fd)
 /* Must hold every projected vertex word AND every copied prim-field word for one
  * frame (~230k verts -> up to ~1M words). 2^21 open-addressed, 16-probe. */
 #define SHADOW_BITS 21
@@ -92,30 +113,43 @@ static inline unsigned ShadowHash(uintptr_t k) {
 	return (unsigned)((k >> 2) * 2654435761u) & SHADOW_MASK;
 }
 
-static void Shadow_Put(void* addr, float x, float y, float w, unsigned value) {
-	uintptr_t k = (uintptr_t)addr;
+/* The entry for `k` to write into: its own slot if the probe chain has one
+ * (so the other half it may hold survives), else the first slot that is
+ * empty or holds nothing of this frame - claimed with both halves invalid.
+ * Probe exhausted: the base slot is overwritten, as before. */
+static ShadowEntry* Shadow_Slot(uintptr_t k) {
 	unsigned s = ShadowHash(k);
+	ShadowEntry* freeSlot = nullptr;
 	for (int i = 0; i < 16; i++) {
 		ShadowEntry* e = &s_shadow[(s + i) & SHADOW_MASK];
-		if (e->key == k || e->key == 0 || e->gen != s_pgxpGen) {
-			e->key = k; e->gen = s_pgxpGen; e->value = value;
-			e->x = x; e->y = y; e->w = w; return;
-		}
+		if (e->key == k) return e;
+		if (e->key == 0) { if (!freeSlot) freeSlot = e; break; }
+		if (!freeSlot && e->gen != s_pgxpGen && e->vgen != s_pgxpGen) freeSlot = e;
 	}
-	ShadowEntry* e = &s_shadow[s];   /* probe exhausted: overwrite base */
-	e->key = k; e->gen = s_pgxpGen; e->value = value;
+	if (!freeSlot) freeSlot = &s_shadow[s];
+	freeSlot->key = k; freeSlot->gen = 0; freeSlot->vgen = 0;
+	return freeSlot;
+}
+
+static const ShadowEntry* Shadow_Find(uintptr_t k) {
+	unsigned s = ShadowHash(k);
+	for (int i = 0; i < 16; i++) {
+		const ShadowEntry* e = &s_shadow[(s + i) & SHADOW_MASK];
+		if (e->key == k) return e;
+		if (e->key == 0) return nullptr;
+	}
+	return nullptr;
+}
+
+static void Shadow_Put(void* addr, float x, float y, float w, unsigned value) {
+	ShadowEntry* e = Shadow_Slot((uintptr_t)addr);
+	e->gen = s_pgxpGen; e->value = value;
 	e->x = x; e->y = y; e->w = w;
 }
 
 static const ShadowEntry* Shadow_Get(const void* addr) {
-	uintptr_t k = (uintptr_t)addr;
-	unsigned s = ShadowHash(k);
-	for (int i = 0; i < 16; i++) {
-		const ShadowEntry* e = &s_shadow[(s + i) & SHADOW_MASK];
-		if (e->key == k) return (e->gen == s_pgxpGen) ? e : nullptr;
-		if (e->key == 0) return nullptr;
-	}
-	return nullptr;
+	const ShadowEntry* e = Shadow_Find((uintptr_t)addr);
+	return (e && e->gen == s_pgxpGen) ? e : nullptr;
 }
 
 /* GTE store hook (DuckStation SWC2, done at source level): record the precise
@@ -157,34 +191,18 @@ extern "C" float g_PsyX_CharaFade = 0.0f;
  * a lighting helper and restores only the GTE registers, and the various drawers
  * each push their own SetGeomScreen. A frame-global therefore reprojects clip
  * vertices with whichever values the LAST RTPS of the frame happened to leave. */
-struct VsEntry { uintptr_t key; unsigned gen; unsigned value; float vx, vy, vz; float nocast; float fade; float ofx, ofy, h; };
-static VsEntry s_vshadow[SHADOW_SIZE];
-
+/* (the view-space half of the shared ShadowEntry table above) */
 static void Vs_Put(void* addr, float vx, float vy, float vz, float nocast, unsigned value,
                    float ofx, float ofy, float h, float fade = 0.0f) {
-	uintptr_t k = (uintptr_t)addr;
-	unsigned s = ShadowHash(k);
-	for (int i = 0; i < 16; i++) {
-		VsEntry* e = &s_vshadow[(s + i) & SHADOW_MASK];
-		if (e->key == k || e->key == 0 || e->gen != s_pgxpGen) {
-			e->key = k; e->gen = s_pgxpGen; e->value = value; e->vx = vx; e->vy = vy; e->vz = vz; e->nocast = nocast;
-			e->fade = fade; e->ofx = ofx; e->ofy = ofy; e->h = h; return;
-		}
-	}
-	VsEntry* e = &s_vshadow[s];
-	e->key = k; e->gen = s_pgxpGen; e->value = value; e->vx = vx; e->vy = vy; e->vz = vz; e->nocast = nocast;
-	e->fade = fade; e->ofx = ofx; e->ofy = ofy; e->h = h;
+	VsEntry* e = Shadow_Slot((uintptr_t)addr);
+	e->vgen = s_pgxpGen; e->vvalue = value; e->vx = vx; e->vy = vy; e->vz = vz;
+	e->nc = (nocast != 0.0f) ? 1 : 0; e->fd = (fade != 0.0f) ? 1 : 0;
+	e->ofx = ofx; e->ofy = ofy; e->h = h;
 }
 
 static const VsEntry* Vs_Get(const void* addr, unsigned value) {
-	uintptr_t k = (uintptr_t)addr;
-	unsigned s = ShadowHash(k);
-	for (int i = 0; i < 16; i++) {
-		const VsEntry* e = &s_vshadow[(s + i) & SHADOW_MASK];
-		if (e->key == k) return (e->gen == s_pgxpGen && e->value == value) ? e : nullptr;
-		if (e->key == 0) return nullptr;
-	}
-	return nullptr;
+	const VsEntry* e = Shadow_Find((uintptr_t)addr);
+	return (e && e->vgen == s_pgxpGen && e->vvalue == value) ? e : nullptr;
 }
 
 /* GTE store hook for the flashlight view-space FIFO (PsyX_GTE.cpp PGXP_StoreAddr,
@@ -210,8 +228,8 @@ extern "C" void Shadow_Copy(void* dst, const void* src) {
 	 * needs it (gate matches the vs FIFO / VShadow_Store in PsyX_GTE.cpp). */
 	if (GR_NeedViewSpaceData()) {
 		const VsEntry* ve = Vs_Get(src, *(const unsigned*)src);
-		if (ve) Vs_Put(dst, ve->vx, ve->vy, ve->vz, ve->nocast, *(const unsigned*)dst,
-		               ve->ofx, ve->ofy, ve->h, ve->fade);
+		if (ve) Vs_Put(dst, ve->vx, ve->vy, ve->vz, VS_NOCAST(ve), *(const unsigned*)dst,
+		               ve->ofx, ve->ofy, ve->h, VS_FADE(ve));
 	}
 }
 
@@ -239,8 +257,8 @@ extern "C" void PsyX_PreciseCornerFrom(void* dst, const void* point, float x, fl
 	}
 	if (GR_NeedViewSpaceData()) {
 		const VsEntry* ve = Vs_Get(point, *(const unsigned*)point);
-		if (ve) Vs_Put(dst, ve->vx, ve->vy, ve->vz, ve->nocast, *(const unsigned*)dst,
-		               ve->ofx, ve->ofy, ve->h, ve->fade);
+		if (ve) Vs_Put(dst, ve->vx, ve->vy, ve->vz, VS_NOCAST(ve), *(const unsigned*)dst,
+		               ve->ofx, ve->ofy, ve->h, VS_FADE(ve));
 	}
 }
 
@@ -262,8 +280,8 @@ extern "C" void PsyX_PreciseGrab(const void* point, float pt[16])
 	if (GR_NeedViewSpaceData()) {
 		const VsEntry* ve = Vs_Get(point, *(const unsigned*)point);
 		if (ve) {
-			pt[4] = ve->vx; pt[5] = ve->vy; pt[6] = ve->vz; pt[7] = ve->nocast;
-			pt[8] = ve->ofx; pt[9] = ve->ofy; pt[10] = ve->h; pt[11] = ve->fade; pt[12] = 1.0f;
+			pt[4] = ve->vx; pt[5] = ve->vy; pt[6] = ve->vz; pt[7] = VS_NOCAST(ve);
+			pt[8] = ve->ofx; pt[9] = ve->ofy; pt[10] = ve->h; pt[11] = VS_FADE(ve); pt[12] = 1.0f;
 		}
 	}
 }
@@ -715,8 +733,8 @@ static inline void VsFillVertex(GrVertex* v, const void* addr)
 	 * marker for the near clipper: a behind-the-eye vertex legitimately has vsz<=0,
 	 * so presence can't be inferred from the position itself. No shader reads ny. */
 	if (e) {
-		v->vsx = e->vx; v->vsy = e->vy; v->vsz = e->vz; v->nx = e->nocast; v->ny = 1.0f;
-		v->nz = e->fade;
+		v->vsx = e->vx; v->vsy = e->vy; v->vsz = e->vz; v->nx = VS_NOCAST(e); v->ny = 1.0f;
+		v->nz = VS_FADE(e);
 		/* Latch this vertex's projection registers for the near clipper: every
 		 * vertex of a poly was transformed under the same GTE state, and the
 		 * clip runs a few calls later in the same ParsePrimitive. */
