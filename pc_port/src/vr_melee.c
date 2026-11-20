@@ -388,6 +388,13 @@ void VrMelee_Update(void)
     int              src, inside[VR_MELEE_TARGETS];
     int              i, k;
 
+    /* once a frame (it runs from Harry's draw, world_draw.c) */
+    {
+        static Uint64 s_lastCall;
+        if (s_lastCall != 0 && now - s_lastCall < SDL_GetPerformanceFrequency() / 1000)
+            return;
+        s_lastCall = now;
+    }
     if (w == NULL || !VrInteract_WeaponLive())
     {
         ResetAll();

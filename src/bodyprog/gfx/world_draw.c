@@ -1416,6 +1416,11 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
          * 2 = held item, which also draws down to the close near plane */
         extern int g_PsyX_ActorVertexDepth;
         g_PsyX_ActorVertexDepth = 2;
+        /* VR melee (vr_melee.c): the hit volumes from the very matrix the
+         * weapon is drawn with this frame - computed before the frame's
+         * Harry and camera moves (pc_combat.c) they trailed the weapon by a
+         * frame while walking. Before the holsters: Show_Hitboxes draws there. */
+        { extern void VrMelee_Update(void); VrMelee_Update(); }
         Pc_VrHolstersDraw();
         { extern void Pc_MinimapVrSheetDraw(GsOT* ot); Pc_MinimapVrSheetDraw(&g_OrderingTable0[g_ActiveBufferIdx]); }
         g_PsyX_ActorVertexDepth = 0;
