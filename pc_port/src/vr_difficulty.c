@@ -8,7 +8,6 @@
 
                        Normal   Hard   Silent Hell
    enemy speed          1.0x    1.2x      1.4x
-   enemy damage         1.0x    1.5x      2.0x
    hit recovery         1.0x    0.7x      0.4x   (time an enemy takes to recover)
    aggressiveness       game    high      max
 
@@ -26,8 +25,7 @@
  AGGRESSIVENESS: SH1 has no aggression value - every monster's behaviour is
  its own state machine. The faster clock is what makes them more aggressive:
  shorter waits between attacks, earlier attacks, less time to react.
- DAMAGE: what reaches Harry, from any monster attack, is scaled where the
- game takes it off his health (player_control.c, after its own difficulty).
+ DAMAGE is the game's own (its Easy / Normal / Hard): not touched here.
 
  Only monsters (Air Screamer .. Monster Cybil), only in gameplay: the
  people, the cat and anything in a cutscene keep their timing.
@@ -45,7 +43,6 @@
 #define VR_DIFF_SLOTS      16
 
 static const float s_speed[3]    = { 1.0f, 1.2f, 1.4f };
-static const float s_damage[3]   = { 1.0f, 1.5f, 2.0f };
 static const float s_recovery[3] = { 1.0f, 0.7f, 0.4f };
 
 static Uint32 s_hurtUntil[VR_DIFF_SLOTS];
@@ -97,13 +94,4 @@ void VrDiff_NpcTickEnd(void)
         g_DeltaTime = s_savedDt;
         s_scaled    = 0;
     }
-}
-
-/* player_control.c: the damage about to come off Harry's health */
-q19_12 VrDiff_PlayerDamage(q19_12 amount)
-{
-    const int m = Mode();
-    if (m == 0 || amount <= Q12(0.0f))
-        return amount;
-    return (q19_12)((float)amount * s_damage[m] + 0.5f);
 }
