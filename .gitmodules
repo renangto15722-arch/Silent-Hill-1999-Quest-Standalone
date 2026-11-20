@@ -1,15 +1,15 @@
 [submodule "tools/asm-differ"]
-	path = SilentHillVR-Quest-0.3-source/tools/asm-differ
+	path = SilentHillVR-Quest-0.4-source/tools/asm-differ
     url = https://github.com/simonlindholm/asm-differ.git
 [submodule "tools/decomp-permuter"]
-	path = SilentHillVR-Quest-0.3-source/tools/decomp-permuter
+	path = SilentHillVR-Quest-0.4-source/tools/decomp-permuter
     url = https://github.com/simonlindholm/decomp-permuter
 [submodule "tools/m2c"]
-	path = SilentHillVR-Quest-0.3-source/tools/m2c
+	path = SilentHillVR-Quest-0.4-source/tools/m2c
     url = https://github.com/matt-kempster/m2c.git
 [submodule "tools/maspsx"]
-	path = SilentHillVR-Quest-0.3-source/tools/maspsx
+	path = SilentHillVR-Quest-0.4-source/tools/maspsx
     url = https://github.com/mkst/maspsx.git
 [submodule "pc_port/third_party/rcheevos"]
-	path = SilentHillVR-Quest-0.3-source/pc_port/third_party/rcheevos
+	path = SilentHillVR-Quest-0.4-source/pc_port/third_party/rcheevos
 	url = https://github.com/RetroAchievements/rcheevos.git
