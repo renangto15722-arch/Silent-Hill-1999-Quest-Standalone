@@ -48,6 +48,26 @@ s16            D_800C4408;
 s16            __pad_bss_800C440A;
 GsCOORDINATE2* D_800C440C;
 GsCOORDINATE2* D_800C4410;
+#ifdef SH_PC_PORT
+/* VR: Harry's gun shots - the flash and sparks belong at the muzzle of the
+ * gun in your hand (vr_ik.c VrIk_GetGunRay, world Q12, vr_aim_* included),
+ * not on his animated hand bone, which stays where the body animation puts
+ * it. 1 + the muzzle in world Q8 (the GTE output units used below) while a
+ * VR gun is held, else 0 (the bone path runs unchanged). */
+static int Pc_VrMuzzleQ8(VECTOR* outQ8)
+{
+    extern int VrIk_GetGunRay(VECTOR3* pos, VECTOR3* fwd);
+    VECTOR3    pos, fwd;
+    if (!VrIk_GetGunRay(&pos, &fwd))
+    {
+        return 0;
+    }
+    outQ8->vx = Q12_TO_Q8(pos.vx);
+    outQ8->vy = Q12_TO_Q8(pos.vy);
+    outQ8->vz = Q12_TO_Q8(pos.vz);
+    return 1;
+}
+#endif
 s8             D_800C4414; /** Flags. */
 s8             __pad_bss_800C4415[3];
 s_800C4418     D_800C4418;
@@ -2422,6 +2442,14 @@ void func_8006342C(s32 weaponAttack, q3_12 rotY, q3_12 rotX, GsCOORDINATE2* coor
     gte_ldv0(&ptr->field_20);
     gte_rt();
     gte_stlvnl(&ptr->field_28);
+#ifdef SH_PC_PORT
+    if (weaponAttack == WEAPON_ATTACK(EquippedWeaponId_Handgun, AttackInputType_Tap) ||
+        weaponAttack == WEAPON_ATTACK(EquippedWeaponId_Shotgun, AttackInputType_Tap) ||
+        weaponAttack == WEAPON_ATTACK(EquippedWeaponId_HuntingRifle, AttackInputType_Tap))
+    {
+        Pc_VrMuzzleQ8(&ptr->field_28);
+    }
+#endif
 
     switch (weaponAttack)
     {
@@ -2620,6 +2648,17 @@ bool func_80063A50(POLY_FT4** poly, s32 idx) // 0x80063A50
     gte_ldv0(&ptr->field_164);
     gte_rt();
     gte_stlvnl(&ptr->field_1AC);
+#ifdef SH_PC_PORT
+    /* Harry's handgun / shotgun / rifle flash rides the VR gun's muzzle
+     * every frame it lives (Pc_VrMuzzleQ8); 18/19 are NPC guns */
+    {
+        const s32 type = g_MapOverlayHdr.unkTable1_4C[idx].field_A;
+        if (type == 15 || type == 16 || type == 17)
+        {
+            Pc_VrMuzzleQ8(&ptr->field_1AC);
+        }
+    }
+#endif
 
     g_MapOverlayHdr.unkTable1_4C[idx].field_0.vx_0 = Q4_TO_Q8(ptr->field_1AC.vx);
     g_MapOverlayHdr.unkTable1_4C[idx].vy_8 = Q4_TO_Q8((u16)ptr->field_1AC.vy);
