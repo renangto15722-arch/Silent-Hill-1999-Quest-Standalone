@@ -380,7 +380,6 @@ typedef struct {
     float vrScreenWidth;    /* cinema/floating screen width in meters, 0.5..8 (vr_screen_width) */
     float vrScreenDistance; /* cinema/floating screen distance in meters, 0.5..10 (vr_screen_distance) */
     float vrFovRollCover;   /* Full VR: head roll (deg) the widened fov still covers, 0..30 (vr_fov_roll_cover) */
-    float vrBodyTurnDeadzone; /* VR: head yaw (deg) each side before the body turns to follow, 0..90 (vr_body_turn_deadzone) */
     int   vrSnapTurn;       /* VR: right-stick snap turn in degrees, 0 = smooth turning, else 15..90 in 15s (vr_snap_turn) */
     float vrUiScreenSize;   /* Full VR: 2D interface panel size in %, 100 = 60 deg wide, 50..150 (vr_ui_screen_size) */
     float vrHeadsetRes;     /* OpenXR eye swapchain size, % of the runtime's recommended size, 100..150 (vr_headset_res); read at VR start */
@@ -398,6 +397,7 @@ typedef struct {
     float vrGunAim[12][5];  /* VR: each gun's own aim, added to vr_aim_*: muzzle forward, up, right (cm), pitch, yaw (deg) (values 8-12 of vr_grip_<id>; vr_ik.c VrIk_GetGunRay) */
     float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..300, default 150 (vr_map_scale; vr_ik.c) */
     int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
+    int   vrFlashlightHead; /* VR: the flashlight points where 0 = the body/view faces, 1 = the headset looks (vr_flashlight_head; bodyprog_80055028.c func_800554C4) */
     int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
     int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */
     int   vrWeaponSelect;   /* VR: how weapons are taken: 0 = holsters on the body, 1 = weapon wheel on the right grip (vr_weapon_select) */

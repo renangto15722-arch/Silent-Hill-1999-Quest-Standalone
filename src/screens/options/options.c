@@ -229,6 +229,7 @@ static const char* const LBL_HOLSTERW[] = { "None", "Kitchen_Knife", "Steel_Pipe
                                             "Shotgun", "Hyper_Blaster", "Map" };   /* 12 = the paper map (PCCFG_HOLSTER_MAP) */
 static const char* const LBL_SNAPTURN[] = { "Smooth", "15", "30", "45", "60", "75", "90" };
 static const char* const LBL_MOVEDIR[]  = { "Body", "Head" };   /* VAL_ONOFF values */
+static const char* const LBL_NOYES[]    = { "No", "Yes" };      /* VAL_ONOFF values */
 static const char* const LBL_CUTVIEW[]  = { "2D_Screen", "Full_VR" };
 static const int         VAL_HMD[]      = { 0, 1, 2, 3, 4, 5, 6 };
 static const char* const LBL_HMD[]      = { "Custom", "Quest_2", "Quest_3", "Quest_3S", "Pico_4", "Vive", "Index" };
@@ -422,13 +423,13 @@ static const s_PcOpt PCOPT_V2[] = {
 /* Page 8: VR Comfort - turning, roll cover and the hands */
 static const s_PcOpt PCOPT_VC[] = {
     { "Roll_Cover_Deg",    NULL, "vr_fov_roll_cover",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrFovRollCover,   NULL, 0.0f, 30.0f, 1.0f },
-    /* Body Turning Deadzone: angular range in which the body does not
-     * follow head rotation (vr_tracking.c VrTracking_TakeBodyTurn). */
-    { "Body_Turning_Deadzone", NULL, "vr_body_turn_deadzone", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrBodyTurnDeadzone, NULL, 0.0f, 90.0f, 1.0f },
     { "Snap_Turn",         &g_PcConfig.vrSnapTurn,         "vr_snap_turn",          VAL_SNAPTURN, 7, LBL_SNAPTURN, NULL, 1, PCK_INT },
     /* Walk Direction: the stick walks where the body faces, or where the
      * headset looks (vr_tracking.c VrTracking_MoveYawOffset) */
     { "Walk_Direction",    &g_PcConfig.vrMoveDir,          "vr_move_dir",           VAL_ONOFF,    2, LBL_MOVEDIR,  NULL, 1, PCK_INT },
+    /* Flashlight Follows Headset: the beam points where the headset looks
+     * instead of along the body (bodyprog_80055028.c func_800554C4) */
+    { "Flashlight_Follows_Headset", &g_PcConfig.vrFlashlightHead, "vr_flashlight_head", VAL_ONOFF, 2, LBL_NOYES, NULL, 1, PCK_INT },
     /* Hands (vr_interact.c): a grip near an item picks it up; held A opens
      * the radial wheel. */
     { "Grab_Radius_m",     NULL, "vr_grab_radius",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrGrabRadius,     NULL, 0.1f, 1.5f, 0.05f },

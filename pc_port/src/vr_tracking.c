@@ -758,7 +758,7 @@ int VrTracking_HeadCamActive(void)
     return g_PcConfig.vrEnabled && VrOvr_IsReady();
 }
 
-/* ---- BODY FOLLOWS THE HEAD (Body_Turning_Deadzone) ------------------------
+/* ---- BODY FOLLOWS THE HEAD (fixed deadzone) ----------------------------
  * The view yaw is the body's base yaw (g_TpsCamYaw, which the FPS body snaps
  * to in player_control.c) plus the head yaw relative to it:
  *     rel = wrap(SIGN_YAW * (head - origin) - s_bodyYawXfer)
@@ -778,6 +778,9 @@ int VrTracking_HeadCamActive(void)
  * context) never turn the body.
  * Returns the turn for this frame as a Q12 angle (4096 = 360 deg). */
 #define VR_BODY_TURN_RATE 6.0f   /* 1/s: ~0.17 s time constant on the excess */
+/* deg each side; was the Body_Turning_Deadzone option (removed 20/11/2026 at
+ * Renan's request), fixed at the value his and the shipped Quest config used */
+#define VR_BODY_TURN_DEADZONE_DEG 12.0f
 
 int VrTracking_TakeBodyTurn(void)
 {
@@ -798,7 +801,7 @@ int VrTracking_TakeBodyTurn(void)
     while (rel >  3.14159265f) rel -= 6.28318531f;
     while (rel < -3.14159265f) rel += 6.28318531f;
 
-    dz = g_PcConfig.vrBodyTurnDeadzone * (3.14159265f / 180.0f);
+    dz = VR_BODY_TURN_DEADZONE_DEG * (3.14159265f / 180.0f);
     if (rel > dz)       excess = rel - dz;
     else if (rel < -dz) excess = rel + dz;
     else                return 0;
@@ -821,7 +824,7 @@ int VrTracking_TakeBodyTurn(void)
 /* Walk_Direction = Head (vr_move_dir 1): the stick walks along the headset's
  * yaw, not the body's. Returned as the head's yaw relative to the body (the
  * rel above, Q12 angle), which player_control.c adds to the movement heading
- * offset - the body still follows the head through Body_Turning_Deadzone.
+ * offset - the body still follows the head past the fixed deadzone.
  * 0 with Body, or when the head does not drive the view (cutscene, menus). */
 int VrTracking_MoveYawOffset(void)
 {
