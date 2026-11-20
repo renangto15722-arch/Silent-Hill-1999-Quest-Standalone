@@ -473,6 +473,16 @@ static int ChainCopy(VrXrChain* c, GLuint src, int srcW, int srcH)
 }
 
 /* ---- session / frames -------------------------------------------------------- */
+/* XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING seen (taken once by
+ * vr_tracking.c VrReadBridge) */
+static int s_spaceChanged;
+int VrXr_TakeSpaceChanged(void)
+{
+    const int c = s_spaceChanged;
+    s_spaceChanged = 0;
+    return c;
+}
+
 
 static void PollEvents(void)
 {
@@ -532,6 +542,15 @@ static void PollEvents(void)
                     pathStr(s_inst, ps.interactionProfile, sizeof(buf), &len, buf);
                 printf("[VR-INPUT] interaction profile changed: %s hand = %s\n", h ? "right" : "left", buf);
             }
+        }
+        else if (ev.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING)
+        {
+            /* the system recenter (holding the Quest button) redefines the
+             * tracking space: the game's origin and the measured body height
+             * must be taken again in the new one (vr_tracking.c) */
+            const XrEventDataReferenceSpaceChangePending* e = (const XrEventDataReferenceSpaceChangePending*)&ev;
+            s_spaceChanged = 1;
+            VrOvr_Log("[VR-XR] reference space %d changed (system recenter)\n", (int)e->referenceSpaceType);
         }
         else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING)
         {

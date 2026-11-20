@@ -323,6 +323,26 @@ static void VrReadBridge(void)
 
     s_newSample = 0;
 
+    /* The system recenter (Quest button held): the space changed under us.
+     * A few frames later - the poses are then in the new space - take the
+     * origin again and let the body height be measured again, or the head
+     * height kept from the old space put the view near the floor (or in the
+     * air) for the rest of the session. */
+    {
+        extern int  VrXr_TakeSpaceChanged(void);
+        extern void VrIk_ResetBodyMeasure(void);
+        extern void VrOvr_Log(const char* fmt, ...);
+        static int  s_recenterIn = 0;
+        if (VrXr_TakeSpaceChanged())
+            s_recenterIn = 10;
+        if (s_recenterIn > 0 && --s_recenterIn == 0)
+        {
+            s_haveOrigin = 0;          /* the next head sample recenters */
+            VrIk_ResetBodyMeasure();
+            VrOvr_Log("[VR] system recenter: origin and body height taken again\n");
+        }
+    }
+
     /* Try native poses first - every frame: the pose was polled for exactly
      * this frame (VrOvr_PollPoseForNextFrame). The read interval below used to
      * gate this too, on a whole-millisecond clock, so a frame starting under

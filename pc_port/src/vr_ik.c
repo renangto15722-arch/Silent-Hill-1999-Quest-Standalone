@@ -880,6 +880,14 @@ static float PlayerHeightM(const HeadFrame* f)
 static float s_eyeRef;
 static int   s_eyeRefOk;
 
+/* A system recenter (vr_tracking.c): the floor and the head height may have
+ * moved - measure the player's height and the eye reference again. */
+void VrIk_ResetBodyMeasure(void)
+{
+    s_eyeMax   = 0.0f;
+    s_eyeRefOk = 0;
+}
+
 static void EyeRefUpdate(float eyeY, float dt)
 {
     if (!s_eyeRefOk || eyeY > s_eyeRef)
