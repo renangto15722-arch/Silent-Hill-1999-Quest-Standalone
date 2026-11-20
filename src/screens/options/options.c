@@ -136,7 +136,7 @@ void Pc_Options_RequestDirectPc(void)
 
 static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Controls, 3 = Camera, 4 = HUD, 5 = VR, 6 = VR Tuning,
                                              * 7 = VR Comfort, 8 = VR Objects, 9 = VR Gun Aim, 10 = VR Holsters */
-#define PCOPT_PAGE_COUNT 11
+#define PCOPT_PAGE_COUNT 12
 
 /* Mouse hover moves the selection WITHOUT resetting g_Options_SelectionHighlightTimer:
  * a reset re-arms the LINE_CURSOR_TIMER_MAX gate, which then swallows the click that
@@ -631,17 +631,26 @@ static const s_PcOpt PCOPT_VH[] = {
     { "Wheel_Distance_cm", NULL, "vr_wwheel_dist",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelDist,     NULL, 0.0f, 40.0f, 1.0f },
     { "Wheel_Width_cm",    NULL, "vr_wwheel_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelWidth,    NULL, 15.0f, 60.0f, 1.0f },
     { "Wheel_Height_cm",   NULL, "vr_wwheel_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelHeight,   NULL, 10.0f, 50.0f, 1.0f },
-    /* vr_difficulty.c: monster speed / damage / hit recovery; Normal = the game's */
+    { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
+    { "Next_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_NEXT },
+    { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
+};
+
+/* Page 13: VR Combat - the melee weapons in the hand (vr_melee.c), the
+ * monsters' difficulty (vr_difficulty.c) and the test tools (training dummy,
+ * hit volumes). Everything live. */
+static const s_PcOpt PCOPT_VCB[] = {
+    /* vr_difficulty.c: monster speed / hit recovery; Normal = the game's */
     { "Combat_Difficulty", &g_PcConfig.vrDifficulty,       "vr_difficulty",         VAL_VRDIFF,    3, LBL_VRDIFF,    NULL, 1, PCK_INT },
-    /* vr_dummy.c: the first enemy that comes close freezes, cannot die, shows each hit */
-    { "Training_Dummy",    &g_PcConfig.vrTrainingDummy,    "vr_training_dummy",     VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
-    /* vr_melee.c: see the melee hit volumes and the enemies' bodies */
-    { "Show_Hitboxes",     &g_PcConfig.vrShowHitboxes,     "vr_show_hitboxes",      VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
     /* vr_melee.c: the shortest time between two damaging swings */
     { "Melee_Cooldown_ms",     NULL, "vr_melee_cooldown_ms", NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrMeleeCooldownMs, NULL, 0.0f, 2000.0f, 50.0f },
     /* vr_melee.c: a motor weapon kept in an enemy cuts once per interval */
     { "Chainsaw_Hit_Every_ms", NULL, "vr_saw_hit_ms",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrSawHitMs,       NULL, 100.0f, 1000.0f, 50.0f },
     { "Drill_Hit_Every_ms",    NULL, "vr_drill_hit_ms",   NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrDrillHitMs,     NULL, 100.0f, 1000.0f, 50.0f },
+    /* vr_dummy.c: the first enemy that comes close freezes, cannot die, shows each hit */
+    { "Training_Dummy",    &g_PcConfig.vrTrainingDummy,    "vr_training_dummy",     VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
+    /* vr_melee.c: see the melee hit volumes and the enemies' bodies */
+    { "Show_Hitboxes",     &g_PcConfig.vrShowHitboxes,     "vr_show_hitboxes",      VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
     /* the last page: no Next */
     { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
     { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },
@@ -654,7 +663,7 @@ static const s_PcOpt PCOPT_VH[] = {
 static const struct { const s_PcOpt* tbl; int count; } PCOPT_PAGES[PCOPT_PAGE_COUNT] = {
     PCOPT_TABLE(PCOPT_G),  PCOPT_TABLE(PCOPT_S),  PCOPT_TABLE(PCOPT_C),  PCOPT_TABLE(PCOPT_T),
     PCOPT_TABLE(PCOPT_H),  PCOPT_TABLE(PCOPT_V),  PCOPT_TABLE(PCOPT_V2), PCOPT_TABLE(PCOPT_VC),
-    { NULL, 0 },           PCOPT_TABLE(PCOPT_VA), PCOPT_TABLE(PCOPT_VH),
+    { NULL, 0 },           PCOPT_TABLE(PCOPT_VA), PCOPT_TABLE(PCOPT_VH), PCOPT_TABLE(PCOPT_VCB),
 };
 #undef PCOPT_TABLE
 
@@ -1892,7 +1901,7 @@ static void Options_PcOptionsMenu_EntryStringsDraw(void)
      * pages (6/7, reached with L1/R1) were easy to miss. */
     static const char* const PAGE_HEADINGS[PCOPT_PAGE_COUNT] = {
         "Graphics", "System", "Controls", "Camera", "HUD", "VR", "VR_Tuning", "VR_Comfort",
-        "VR_Objects", "VR_Gun_Aim", "VR_Holsters"
+        "VR_Objects", "VR_Gun_Aim", "VR_Holsters", "VR_Combat"
     };
     const char*    HEADING = (g_PcOptionsMenu_Page >= 0 && g_PcOptionsMenu_Page < PCOPT_PAGE_COUNT)
                            ? PAGE_HEADINGS[g_PcOptionsMenu_Page] : "PC_Options";
