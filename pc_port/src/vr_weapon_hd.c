@@ -439,57 +439,110 @@ void VrWeaponHd_HandOccluder(int itemId, const MATRIX* plmWorld)
     VrHands_OccluderSet(0, pts, n);
 }
 
-/* The weapon's length axis in the held model's frame (PLM local, world Q8
- * units, its VR_Objects Scale included) - what vr_melee.c strikes with: the
- * unit direction from the hand bone (the grip) to the farthest point of the
- * close-up model, and how far the model runs along it. 0 = the model is not
- * loaded yet (it loads the first time the weapon is drawn in the hand). */
-int VrWeaponHd_LengthAxis(int itemId, float dir[3], float* len)
+/* Where the weapon strikes, from its own mesh, in the held model's frame
+ * (PLM local, world Q8 units, its VR_Objects Scale included) - vr_melee.c's
+ * two spheres / box ends:
+ *   the LENGTH AXIS is the mesh's principal axis (the direction it is longest
+ *   in, through its centre), oriented from the handle end (the end nearer
+ *   the hand bone) to the far end;
+ *   tip  = the centre of the mesh's last 12% along it (a blade's point, the
+ *          middle of an axe or hammer head), put at the very end;
+ *   base = the centre of the mesh around fraction `from` of the length.
+ * Both are centres of real vertices, so they sit inside the mesh - not on a
+ * line from the hand bone, which is not on the weapon's axis. 0 = the model
+ * is not loaded yet (it loads the first time the weapon is drawn). */
+#define VR_STRIKE_MAXV 512
+int VrWeaponHd_StrikePoints(int itemId, float from, float tip[3], float base[3])
 {
+    static float      pts[VR_STRIKE_MAXV][3];
     const int         w = VrWeaponHd_Index(itemId);
     const VrWeaponHd* h;
     const s16*        verts;
-    float             lm[9], lt[3], best = 0.0f, u[3] = { 0.0f, 0.0f, 0.0f }, L = 0.0f;
+    float             lm[9], lt[3], c[3] = { 0, 0, 0 }, cov[3][3], u[3], pmin = 1e30f, pmax = -1e30f, L;
     double            k;
-    u32               i;
-    int               a, slot;
+    int               n, i, a, b, it;
 
     if (w < 0 || !s_hd[w].ready)
         return 0;
     h     = &s_hd[w];
-    slot  = PcConfig_GripSlot(itemId);
-    k     = ((slot >= 0) ? g_PcConfig.vrGripScale[slot] : 100.0f) / 100.0;
+    i     = PcConfig_GripSlot(itemId);
+    k     = ((i >= 0) ? g_PcConfig.vrGripScale[i] : 100.0f) / 100.0;
     for (a = 0; a < 9; a++) lm[a] = (float)(h->em[a] * k);
     for (a = 0; a < 3; a++) lt[a] = (float)(h->et[a] * k);
     verts = (const s16*)h->tmd.vertop;
-
-    /* pass 1: the farthest vertex from the grip gives the direction */
-    for (i = 0; i < (u32)h->tmd.vern; i++)
-    {
-        const s16* v = verts + i * 4;
-        float      l[3], d2;
-        for (a = 0; a < 3; a++)
-            l[a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
-        d2 = l[0] * l[0] + l[1] * l[1] + l[2] * l[2];
-        if (d2 > best) { best = d2; u[0] = l[0]; u[1] = l[1]; u[2] = l[2]; }
-    }
-    if (best <= 1.0f)
+    n     = ((int)h->tmd.vern < VR_STRIKE_MAXV) ? (int)h->tmd.vern : VR_STRIKE_MAXV;
+    if (n < 4)
         return 0;
-    best = sqrtf(best);
-    for (a = 0; a < 3; a++) u[a] /= best;
 
-    /* pass 2: the model's extent along it (the tip, on the axis) */
-    for (i = 0; i < (u32)h->tmd.vern; i++)
+    for (i = 0; i < n; i++)
     {
         const s16* v = verts + i * 4;
-        float      l[3], p;
         for (a = 0; a < 3; a++)
-            l[a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
-        p = l[0] * u[0] + l[1] * u[1] + l[2] * u[2];
-        if (p > L) L = p;
+        {
+            pts[i][a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
+            c[a] += pts[i][a];
+        }
     }
-    for (a = 0; a < 3; a++) dir[a] = u[a];
-    *len = L;
+    for (a = 0; a < 3; a++) c[a] /= (float)n;
+
+    /* the principal axis: power iteration on the covariance */
+    for (a = 0; a < 3; a++)
+        for (b = 0; b < 3; b++) cov[a][b] = 0.0f;
+    for (i = 0; i < n; i++)
+        for (a = 0; a < 3; a++)
+            for (b = 0; b < 3; b++) cov[a][b] += (pts[i][a] - c[a]) * (pts[i][b] - c[b]);
+    u[0] = 0.577f; u[1] = 0.577f; u[2] = 0.577f;
+    for (it = 0; it < 32; it++)
+    {
+        float nu[3], len;
+        for (a = 0; a < 3; a++) nu[a] = cov[a][0] * u[0] + cov[a][1] * u[1] + cov[a][2] * u[2];
+        len = sqrtf(nu[0] * nu[0] + nu[1] * nu[1] + nu[2] * nu[2]);
+        if (len < 1e-9f)
+            return 0;
+        for (a = 0; a < 3; a++) u[a] = nu[a] / len;
+    }
+
+    /* from the handle (the end the hand bone is nearer) to the far end */
+    if (-(c[0] * u[0] + c[1] * u[1] + c[2] * u[2]) > 0.0f)   /* the hand bone's projection, about c */
+        for (a = 0; a < 3; a++) u[a] = -u[a];
+    for (i = 0; i < n; i++)
+    {
+        const float p = (pts[i][0] - c[0]) * u[0] + (pts[i][1] - c[1]) * u[1] + (pts[i][2] - c[2]) * u[2];
+        if (p < pmin) pmin = p;
+        if (p > pmax) pmax = p;
+    }
+    L = pmax - pmin;
+    if (L <= 1.0f)
+        return 0;
+
+    /* the mesh's centre in a slice [p0, p1] of the length, moved along the
+     * axis to `at` */
+    {
+        const float lo[2] = { pmax - 0.12f * L, pmin + from * L - 0.06f * L };
+        const float hi[2] = { pmax,             pmin + from * L + 0.06f * L };
+        const float at[2] = { pmax,             pmin + from * L };
+        float*      out[2] = { tip, base };
+        int         s;
+        for (s = 0; s < 2; s++)
+        {
+            float m[3] = { 0, 0, 0 }, pm;
+            int   cnt = 0;
+            for (i = 0; i < n; i++)
+            {
+                const float p = (pts[i][0] - c[0]) * u[0] + (pts[i][1] - c[1]) * u[1] + (pts[i][2] - c[2]) * u[2];
+                if (p < lo[s] || p > hi[s])
+                    continue;
+                for (a = 0; a < 3; a++) m[a] += pts[i][a];
+                cnt++;
+            }
+            if (cnt == 0)
+                for (a = 0; a < 3; a++) m[a] = c[a];   /* nothing there: on the axis */
+            else
+                for (a = 0; a < 3; a++) m[a] /= (float)cnt;
+            pm = (m[0] - c[0]) * u[0] + (m[1] - c[1]) * u[1] + (m[2] - c[2]) * u[2];
+            for (a = 0; a < 3; a++) out[s][a] = m[a] + u[a] * (at[s] - pm);
+        }
+    }
     return 1;
 }
 

@@ -9,7 +9,7 @@
 
  THE WEAPON. Its shape is the close-up model drawn in the hand, with the VR
  Weapon Grip placement and Scale (vr_ik.c VrIk_HeldItemMatrix,
- vr_weapon_hd.c VrWeaponHd_LengthAxis): the axis from the grip to the tip.
+ vr_weapon_hd.c VrWeaponHd_StrikePoints): the mesh's own length axis.
  Until that model is loaded, a segment along the controller (s_melee reach).
 
  SWUNG WEAPONS (knife, pipe, hammer, axe, katana): two spheres on the axis,
@@ -67,7 +67,7 @@ extern int    VrIk_TrackingToWorld(const float p[3], VECTOR3* out);
 extern int    VrIk_WorldToTracking(const float* w, float* p, int n);
 extern int    VrIk_HeldItemMatrix(MATRIX* out);
 extern float  VrIk_UnitsPerMeter(void);
-extern int    VrWeaponHd_LengthAxis(int itemId, float dir[3], float* len);
+extern int    VrWeaponHd_StrikePoints(int itemId, float from, float tip[3], float base[3]);
 extern q19_12 Game_GasWeaponPowerTimerValue(void);
 extern void   VrOvr_Log(const char* fmt, ...);
 
@@ -339,13 +339,11 @@ static int WeaponPoints(const s_VrMelee* w, u8 item, int hand, float tipW[3], fl
                         float gripW[3])
 {
     MATRIX hm;
-    float  u[3], L;
+    float  lt[3], lb[3];
     int    i;
 
-    if (VrIk_HeldItemMatrix(&hm) && VrWeaponHd_LengthAxis(item, u, &L))
+    if (VrIk_HeldItemMatrix(&hm) && VrWeaponHd_StrikePoints(item, w->from, lt, lb))
     {
-        float lt[3], lb[3];
-        for (i = 0; i < 3; i++) { lt[i] = u[i] * L; lb[i] = u[i] * L * w->from; }
         for (i = 0; i < 3; i++)
         {
             tipW[i]  = (hm.m[i][0] * lt[0] + hm.m[i][1] * lt[1] + hm.m[i][2] * lt[2]) / 4096.0f + (float)hm.t[i];
