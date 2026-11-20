@@ -150,7 +150,8 @@ static s32 g_PcOptionsMenu_Page       = 0; /* 0 = Graphics, 1 = System, 2 = Cont
 s32 g_PcOptions_HighlightSnap = 0;
 
 /* PCK_EXPAND: a VR Objects list entry; adjusting it opens / closes the entry (field = its open flag) */
-enum { PCK_INT, PCK_RES, PCK_FILTER, PCK_WINMODE, PCK_VSYNC, PCK_SLIDER, PCK_MAP, PCK_FLMODE, PCK_PRESET, PCK_EXPAND, PCK_NEXT, PCK_PREV, PCK_BACK };
+/* PCK_WRESET: a VR Objects weapon's Restore_Defaults (field = its inventory item id) */
+enum { PCK_INT, PCK_RES, PCK_FILTER, PCK_WINMODE, PCK_VSYNC, PCK_SLIDER, PCK_MAP, PCK_FLMODE, PCK_PRESET, PCK_EXPAND, PCK_WRESET, PCK_NEXT, PCK_PREV, PCK_BACK };
 
 /* PC-options row origin. The heading sits at y=20 and the rows used to start at 56,
  * leaving a full empty row beneath it while the pages ran off the BOTTOM of the
@@ -431,7 +432,7 @@ static const s_PcOpt PCOPT_VC[] = {
     { "Walk_Direction",    &g_PcConfig.vrMoveDir,          "vr_move_dir",           VAL_ONOFF,    2, LBL_MOVEDIR,  NULL, 1, PCK_INT },
     /* Flashlight Follows Headset: the beam points where the headset looks
      * instead of along the body (bodyprog_80055028.c func_800554C4) */
-    { "Flashlight_Follows_Headset", &g_PcConfig.vrFlashlightHead, "vr_flashlight_head", VAL_ONOFF, 2, LBL_NOYES, NULL, 1, PCK_INT },
+    { "Flashlight_On_Head", &g_PcConfig.vrFlashlightHead, "vr_flashlight_head", VAL_ONOFF, 2, LBL_NOYES, NULL, 1, PCK_INT },
     /* Hands (vr_interact.c): a grip near an item picks it up; held A opens
      * the radial wheel. */
     { "Grab_Radius_m",     NULL, "vr_grab_radius",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrGrabRadius,     NULL, 0.1f, 1.5f, 0.05f },
@@ -459,7 +460,7 @@ static const struct { int item; const char* name; } VROBJ_WEAPONS[] = {
     { 161, "Hunting_Rifle" }, { 162, "Shotgun" },      { 163, "Hyper_Blaster" },
 };
 #define VROBJ_WEAPON_COUNT ((int)(sizeof(VROBJ_WEAPONS) / sizeof(VROBJ_WEAPONS[0])))
-#define VROBJ_MAX_ROWS     (2 + VROBJ_WEAPON_COUNT * 8 + 4 * 5 + 8 + 3)   /* + 5 aim rows on each of the 4 guns */
+#define VROBJ_MAX_ROWS     (2 + VROBJ_WEAPON_COUNT * 9 + 4 * 5 + 8 + 3)   /* + 5 aim rows on each of the 4 guns, + Restore_Defaults each */
 
 static int     s_vrObjCatOpen[2] = { 1, 0 };            /* Weapons, Map */
 static int     s_vrObjWeaponOpen[VROBJ_WEAPON_COUNT];
@@ -551,6 +552,17 @@ static int PcOpt_VrObjectsBuild(void)
                     r->fstep = VROBJ_AIM_ROWS[k].step;
                 }
             }
+            /* this weapon's position, rotation, scale (and a gun's aim) back
+             * to the defaults (PcOpt_WeaponReset) */
+            {
+                static int s_resetItem[VROBJ_WEAPON_COUNT];
+                s_PcOpt*   r = &s_vrObjRows[n++];
+                s_resetItem[w] = item;
+                r->name     = "______Restore_Defaults";
+                r->field    = &s_resetItem[w];
+                r->realtime = 1;
+                r->kind     = PCK_WRESET;
+            }
         }
     }
 
@@ -579,6 +591,22 @@ static int PcOpt_VrObjectsBuild(void)
     s_vrObjRows[n++] = next;
     s_vrObjRows[n++] = back;
     return n;
+}
+
+/* VR Objects Restore_Defaults: one weapon's grip offset, rotation, scale and
+ * (guns) aim back to the built-in defaults, live, and its vr_grip_<id> line
+ * rewritten. A default scale of -1 means "the global weapon size". */
+static void PcOpt_WeaponReset(int item)
+{
+    const s_PcConfig* d    = PcConfig_Defaults();
+    const int         slot = PcConfig_GripSlot(item);
+    if (slot < 0)
+        return;
+    memcpy(g_PcConfig.vrGrip[slot], d->vrGrip[slot], sizeof(g_PcConfig.vrGrip[slot]));
+    memcpy(g_PcConfig.vrGunAim[slot], d->vrGunAim[slot], sizeof(g_PcConfig.vrGunAim[slot]));
+    g_PcConfig.vrGripScale[slot] = (d->vrGripScale[slot] < 0.0f) ? g_PcConfig.vrWeaponSize : d->vrGripScale[slot];
+    PcConfig_SaveGrip(item);
+    SH_DBG_ECHO("Weapon %d: grip restored to defaults", item);
 }
 
 /* A slider's value into config.cfg: a weapon's row rewrites its whole
@@ -779,6 +807,8 @@ static const char* PcOpt_ValueLabel(const s_PcOpt* e, char* buf, int bufsz)
     }
     if (e->kind == PCK_EXPAND)
         return "";   /* the [+] / [-] in its name says it all */
+    if (e->kind == PCK_WRESET)
+        return "Press";
     if (e->kind == PCK_MAP) {
         return g_PcConfig.mapName[0] ? g_PcConfig.mapName : "map0_s00";
     }
@@ -868,6 +898,11 @@ static void PcOpt_Adjust(const s_PcOpt* e, int dir)
         PcOpt_SaveSlider(e);
         PcOpt_PresetDemote(e);
         SH_DBG_ECHO("%s: %.2f", e->name, v);
+        return;
+    }
+    if (e->kind == PCK_WRESET) {
+        /* right or a click restores; left does nothing (no accidental reset) */
+        if (dir > 0 && e->field) PcOpt_WeaponReset(*e->field);
         return;
     }
     if (e->kind == PCK_EXPAND) {
@@ -1879,9 +1914,9 @@ void Options_PcOptionsMenu_Control(void)
         }
 
         if (g_Controller0->clickedBtnFlags & g_GameWorkPtr->config.controllerConfig.enter) {
-            if (sel->kind == PCK_EXPAND) {
+            if (sel->kind == PCK_EXPAND || sel->kind == PCK_WRESET) {
                 Sd_PlaySfx(Sfx_MenuConfirm, 0, 64);
-                PcOpt_Adjust(sel, +1);   /* open / close the entry */
+                PcOpt_Adjust(sel, +1);   /* open / close the entry, or restore it */
             } else if (sel->kind == PCK_NEXT) {
                 Sd_PlaySfx(Sfx_MenuConfirm, 0, 64);
                 g_PcOptionsMenu_Page++; /* Graphics -> System -> Controls -> Camera -> HUD -> VR -> VR Tuning */
