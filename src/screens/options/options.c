@@ -201,6 +201,8 @@ static const char* const LBL_VSYNC[] = { "Off", "On" };
 static const char* const LBL_FILT[]  = { "Off", "Dither", "Bilinear", "Trilinear",
                                          "Aniso_2x", "Aniso_4x", "Aniso_8x", "Aniso_16x" };
 static const char* const LBL_ONOFF[] = { "Off", "On" };
+static const int         VAL_VRDIFF[] = { 0, 1, 2 };
+static const char* const LBL_VRDIFF[] = { "Normal", "Hard", "Hell_on_Earth" };
 static const char* const LBL_AA[]    = { "Off", "2x", "4x", "8x" };
 static const char* const LBL_POST[]  = { "Off", "CRT", "Scanlines", "Vignette", "Color_Grade", "Film_Grain", "Sharpen", "PSX_Retro", "Cinematic" };
 static const char* const LBL_TONE[]  = { "Off", "Reinhard", "ACES", "Filmic" };
@@ -629,6 +631,8 @@ static const s_PcOpt PCOPT_VH[] = {
     { "Wheel_Distance_cm", NULL, "vr_wwheel_dist",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelDist,     NULL, 0.0f, 40.0f, 1.0f },
     { "Wheel_Width_cm",    NULL, "vr_wwheel_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelWidth,    NULL, 15.0f, 60.0f, 1.0f },
     { "Wheel_Height_cm",   NULL, "vr_wwheel_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelHeight,   NULL, 10.0f, 50.0f, 1.0f },
+    /* vr_difficulty.c: monster speed / damage / hit recovery; Normal = the game's */
+    { "Combat_Difficulty", &g_PcConfig.vrDifficulty,       "vr_difficulty",         VAL_VRDIFF,    3, LBL_VRDIFF,    NULL, 1, PCK_INT },
     /* vr_dummy.c: the first enemy that comes close freezes, cannot die, shows each hit */
     { "Training_Dummy",    &g_PcConfig.vrTrainingDummy,    "vr_training_dummy",     VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
     /* vr_melee.c: see the melee hit volumes and the enemies' bodies */
