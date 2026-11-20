@@ -131,9 +131,16 @@ static Uint32 s_nextSwingMs;               /* recovery: no new swing before */
 /* per enemy */
 static u8     s_latched[VR_MELEE_TARGETS]; /* in the body since the last contact */
 static u8     s_pending[VR_MELEE_TARGETS]; /* in the body, fast, swing still too young: judged again */
+static u32    s_latchSwing[VR_MELEE_TARGETS]; /* the swing that last judged it */
+static u32    s_swingId;                   /* counts swings */
 static Uint32 s_lastCutMs[VR_MELEE_TARGETS];
 
 static int    s_inStrike;                  /* our own func_8008B714 call */
+
+/* Show_Hitboxes (vr_show_hitboxes): this frame's volumes, world Q12 */
+static int    s_dbgValid, s_dbgMotor, s_dbgLive;
+static float  s_dbgA[3], s_dbgB[3], s_dbgR;
+static Uint32 s_dbgHitMs;
 
 static const s_VrMelee* MeleeOf(u8 item)
 {
@@ -146,6 +153,7 @@ static const s_VrMelee* MeleeOf(u8 item)
 static void ResetAll(void)
 {
     s_prevValid = 0;
+    s_dbgValid  = 0;
     s_swing     = 0;
     s_hitMask   = 0;
     memset(s_latched, 0, sizeof(s_latched));
@@ -258,16 +266,18 @@ static int BoxInCyl(const Cyl* c, const float a[3], const float b[3], float h, f
     return 0;
 }
 
-/* No wall between Harry's chest and the contact, as func_8008BF84 checks. */
-static int Reachable(const float atQ12[3])
+/* No wall between the hand holding the weapon and the contact (the game's
+ * melee checks from Harry's chest, func_8008BF84; in VR the weapon is where
+ * the hand is, and from the chest a counter or a table between the body and
+ * a hand reaching over it blocked real hits). */
+static int Reachable(const float gripQ12[3], const float atQ12[3])
 {
     static s_RayTrace trace;
-    const s_SubCharacter* pl = &g_SysWork.playerWork.player;
     VECTOR3 from, to;
 
-    from.vx = pl->position.vx;
-    from.vy = pl->position.vy + pl->collision.box.top;
-    from.vz = pl->position.vz;
+    from.vx = (s32)gripQ12[0];
+    from.vy = (s32)gripQ12[1];
+    from.vz = (s32)gripQ12[2];
     to.vx   = (s32)atQ12[0];
     to.vy   = (s32)atQ12[1];
     to.vz   = (s32)atQ12[2];
@@ -303,6 +313,7 @@ static void Strike(s_SubCharacter* t, const float atQ12[3], const float dirWorld
     s_inStrike = 1;
     func_8008B714(pl, t, &at, (info->field_10 == 1) ? Q12(0.25f) : Q12(1.0f));
     s_inStrike = 0;
+    s_dbgHitMs = SDL_GetTicks();
     pl->field_44 = saved;
 
     if (factor < 1.0f)
@@ -324,7 +335,8 @@ static void Normalize(float v[3])
 /* The weapon's tip and the start of its striking part this frame: world Q8
  * and the tip in tracking space (m). 2 = from the model in the hand, 1 = the
  * controller fallback, 0 = no pose. */
-static int WeaponPoints(const s_VrMelee* w, u8 item, int hand, float tipW[3], float baseW[3], float tipT[3])
+static int WeaponPoints(const s_VrMelee* w, u8 item, int hand, float tipW[3], float baseW[3], float tipT[3],
+                        float gripW[3])
 {
     MATRIX hm;
     float  u[3], L;
@@ -338,13 +350,14 @@ static int WeaponPoints(const s_VrMelee* w, u8 item, int hand, float tipW[3], fl
         {
             tipW[i]  = (hm.m[i][0] * lt[0] + hm.m[i][1] * lt[1] + hm.m[i][2] * lt[2]) / 4096.0f + (float)hm.t[i];
             baseW[i] = (hm.m[i][0] * lb[0] + hm.m[i][1] * lb[1] + hm.m[i][2] * lb[2]) / 4096.0f + (float)hm.t[i];
+            gripW[i] = (float)hm.t[i];
         }
         return VrIk_WorldToTracking(tipW, tipT, 1) ? 2 : 0;
     }
     {
         /* the weapon runs out of the fist: grip pose -Z */
         float   gp[3], gr[3][3], bT[3];
-        VECTOR3 a, b;
+        VECTOR3 a, b, g;
         if (!VrOvr_GetHandPose(hand, gp, gr))
             return 0;
         for (i = 0; i < 3; i++)
@@ -352,8 +365,9 @@ static int WeaponPoints(const s_VrMelee* w, u8 item, int hand, float tipW[3], fl
             tipT[i] = gp[i] - gr[i][2] * w->reach;
             bT[i]   = gp[i] - gr[i][2] * w->reach * w->from;
         }
-        if (!VrIk_TrackingToWorld(tipT, &a) || !VrIk_TrackingToWorld(bT, &b))
+        if (!VrIk_TrackingToWorld(tipT, &a) || !VrIk_TrackingToWorld(bT, &b) || !VrIk_TrackingToWorld(gp, &g))
             return 0;
+        gripW[0] = g.vx / 16.0f; gripW[1] = g.vy / 16.0f; gripW[2] = g.vz / 16.0f;
         tipW[0]  = a.vx / 16.0f; tipW[1]  = a.vy / 16.0f; tipW[2]  = a.vz / 16.0f;
         baseW[0] = b.vx / 16.0f; baseW[1] = b.vy / 16.0f; baseW[2] = b.vz / 16.0f;
         return 1;
@@ -369,7 +383,7 @@ void VrMelee_Update(void)
     const Uint64     now  = SDL_GetPerformanceCounter();
     const Uint32     ms   = SDL_GetTicks();
     const u8         wid  = (u8)(item - InvItemId_KitchenKnife);
-    float            tipW[3], baseW[3], tipT[3], aQ[3], bQ[3], maQ[3], mbQ[3], vel[3] = { 0, 0, 0 };
+    float            tipW[3], baseW[3], tipT[3], gripW[3], gQ[3], aQ[3], bQ[3], maQ[3], mbQ[3], vel[3] = { 0, 0, 0 };
     float            speed = 0.0f, dt, rQ, kbW[3];
     int              src, inside[VR_MELEE_TARGETS];
     int              i, k;
@@ -379,7 +393,7 @@ void VrMelee_Update(void)
         ResetAll();
         return;
     }
-    src = WeaponPoints(w, item, hand, tipW, baseW, tipT);
+    src = WeaponPoints(w, item, hand, tipW, baseW, tipT, gripW);
     if (!src)
     {
         ResetAll();
@@ -396,6 +410,7 @@ void VrMelee_Update(void)
     /* world Q12; the sweep: half way back to last frame */
     for (k = 0; k < 3; k++)
     {
+        gQ[k] = gripW[k] * 16.0f;
         aQ[k] = tipW[k] * 16.0f;
         bQ[k] = baseW[k] * 16.0f;
         maQ[k] = s_prevValid ? (tipW[k] + s_prevTipW[k]) * 8.0f : aQ[k];
@@ -431,6 +446,7 @@ void VrMelee_Update(void)
         if (!s_swing && speed >= w->vMin * VR_MELEE_START_K && (s32)(ms - s_nextSwingMs) >= 0)
         {
             s_swing   = 1;
+            s_swingId++;
             s_swingT0 = ms;
             s_arc     = 0.0f;
             s_slowMs  = 0.0f;
@@ -478,8 +494,11 @@ void VrMelee_Update(void)
                 continue;
             if (s_latched[i] && (float)(ms - s_lastCutMs[i]) < every)
                 continue;
-            if (!Reachable(at))
+            if (!Reachable(gQ, at))
+            {
+                VrOvr_Log("[VR-MELEE] cut blocked: a wall between the hand and chara %d\n", (int)t->model.charaId);
                 continue;
+            }
             s_latched[i]   = 1;
             s_lastCutMs[i] = ms;
             {
@@ -495,12 +514,16 @@ void VrMelee_Update(void)
          * enough but whose swing has only just begun (time / arc not yet
          * reached) stays PENDING and is judged again the next frames while
          * the weapon is still in; anything else is decided at once. */
-        if ((s_latched[i] && !s_pending[i]) || (s_hitMask & (1u << i)))
+        /* the same swing never judges an enemy twice; a NEW swing (a real one:
+         * the speed, time and arc below) may hit it even if the weapon never
+         * left its body - standing close, or walking in, it often does not */
+        if ((s_latched[i] && !s_pending[i] && s_latchSwing[i] == s_swingId) || (s_hitMask & (1u << i)))
         {
             s_latched[i] = 1;
             continue;
         }
-        s_latched[i] = 1;
+        s_latched[i]    = 1;
+        s_latchSwing[i] = s_swingId;
         {
             const float v      = (speed > s_prevSpeed) ? speed : s_prevSpeed;
             const float swingMs = s_swing ? (float)(ms - s_swingT0) : 0.0f;
@@ -525,8 +548,12 @@ void VrMelee_Update(void)
                           (int)item, (int)t->model.charaId, why, (double)v, (double)s_arc, (double)swingMs);
                 continue;
             }
-            if (!Reachable(at))
+            if (!Reachable(gQ, at))
+            {
+                VrOvr_Log("[VR-MELEE] blocked: a wall between the hand and chara %d (%.2f m/s)\n",
+                          (int)t->model.charaId, (double)v);
                 continue;
+            }
             speedEff = (v - w->vMin) / (w->vFull - w->vMin);
             arcEff   = (s_arc - w->arcMin) / (w->arcFull - w->arcMin);
             speedEff = (speedEff < 0.0f) ? 0.0f : (speedEff > 1.0f) ? 1.0f : speedEff;
@@ -553,9 +580,97 @@ void VrMelee_Update(void)
         s_prevTipW[k]  = tipW[k];
         s_prevBaseW[k] = baseW[k];
     }
+    /* what Show_Hitboxes draws this frame */
+    for (k = 0; k < 3; k++) { s_dbgA[k] = aQ[k]; s_dbgB[k] = bQ[k]; }
+    s_dbgR     = rQ;
+    s_dbgMotor = w->motor;
+    s_dbgLive  = w->motor ? (VrInteract_WeaponTriggerHeld() && Game_GasWeaponPowerTimerValue() != Q12(0.0f)) : s_swing;
+    s_dbgValid = 1;
+
     s_prevSpeed = speed;
     s_prevValid = 1;
     s_prevItem  = item;
     s_prevHand  = hand;
     s_prevTicks = now;
+}
+
+/* Show_Hitboxes (world_draw.c, with the holsters): the weapon's hit volume -
+ * the two spheres and the bar between them (swung) or the box (motor) - and
+ * each enemy's body cylinder (green), see-through. The weapon is white while
+ * idle, yellow during a swing (motor: trigger held, motor on), red for a
+ * moment after a hit. */
+void VrMelee_DebugDraw(GsOT* ot)
+{
+    extern void VrBox_DrawEx(GsOT * ot, const VECTOR3* centre, const float axes[3][3], const float half[3],
+                             u8 r, u8 g, u8 b, int alpha);
+    static const float ident[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+    float   u[3], e1[3], e2[3], axes[3][3], half[3], len, n, r;
+    VECTOR3 c;
+    u8      cr, cg, cb;
+    int     i, k;
+
+    if (!g_PcConfig.vrShowHitboxes || !s_dbgValid || !VrInteract_WeaponLive())
+        return;
+
+    /* the enemies' bodies */
+    for (i = 0; i < VR_MELEE_TARGETS; i++)
+    {
+        const s_SubCharacter* t = &g_SysWork.npcs[i];
+        Cyl                   cyl;
+        if (!Hittable(t))
+            continue;
+        CylOf(t, &cyl);
+        c.vx = (s32)cyl.x;
+        c.vy = (s32)((cyl.y0 + cyl.y1) * 0.5f);
+        c.vz = (s32)cyl.z;
+        half[0] = half[2] = cyl.r / 4096.0f;
+        half[1] = (cyl.y1 - cyl.y0) * 0.5f / 4096.0f;
+        VrBox_DrawEx(ot, &c, ident, half, 60, 220, 90, 60);
+    }
+
+    /* the weapon's frame: u along it (base -> tip), e1 / e2 across */
+    for (k = 0; k < 3; k++) u[k] = s_dbgA[k] - s_dbgB[k];
+    len = sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    if (len < 1.0f)
+        return;
+    for (k = 0; k < 3; k++) u[k] /= len;
+    if (fabsf(u[1]) < 0.9f) { e1[0] = -u[2]; e1[1] = 0.0f; e1[2] = u[0]; }
+    else                    { e1[0] = 0.0f; e1[1] = u[2]; e1[2] = -u[1]; }
+    n = sqrtf(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+    for (k = 0; k < 3; k++) e1[k] /= n;
+    e2[0] = u[1] * e1[2] - u[2] * e1[1];
+    e2[1] = u[2] * e1[0] - u[0] * e1[2];
+    e2[2] = u[0] * e1[1] - u[1] * e1[0];
+    for (k = 0; k < 3; k++) { axes[k][0] = e1[k]; axes[k][1] = e2[k]; axes[k][2] = u[k]; }
+
+    if (SDL_GetTicks() - s_dbgHitMs < 250u) { cr = 255; cg = 40;  cb = 40;  }
+    else if (s_dbgLive)                     { cr = 255; cg = 220; cb = 40;  }
+    else                                    { cr = 230; cg = 230; cb = 255; }
+    r = s_dbgR / 4096.0f;
+
+    if (s_dbgMotor)
+    {
+        /* the box along the cutting part */
+        c.vx = (s32)((s_dbgA[0] + s_dbgB[0]) * 0.5f);
+        c.vy = (s32)((s_dbgA[1] + s_dbgB[1]) * 0.5f);
+        c.vz = (s32)((s_dbgA[2] + s_dbgB[2]) * 0.5f);
+        half[0] = half[1] = r;
+        half[2] = len * 0.5f / 4096.0f;
+        VrBox_DrawEx(ot, &c, axes, half, cr, cg, cb, 110);
+        return;
+    }
+
+    /* the two spheres (drawn as cubes of the sphere's radius) ... */
+    half[0] = half[1] = half[2] = r;
+    c.vx = (s32)s_dbgA[0]; c.vy = (s32)s_dbgA[1]; c.vz = (s32)s_dbgA[2];
+    VrBox_DrawEx(ot, &c, axes, half, cr, cg, cb, 130);
+    c.vx = (s32)s_dbgB[0]; c.vy = (s32)s_dbgB[1]; c.vz = (s32)s_dbgB[2];
+    VrBox_DrawEx(ot, &c, axes, half, cr, cg, cb, 130);
+    /* ... and the capsule between them, thinner */
+    c.vx = (s32)((s_dbgA[0] + s_dbgB[0]) * 0.5f);
+    c.vy = (s32)((s_dbgA[1] + s_dbgB[1]) * 0.5f);
+    c.vz = (s32)((s_dbgA[2] + s_dbgB[2]) * 0.5f);
+    half[0] = half[1] = r * 0.5f;
+    half[2] = len * 0.5f / 4096.0f;
+    VrBox_DrawEx(ot, &c, axes, half, cr, cg, cb, 60);
 }

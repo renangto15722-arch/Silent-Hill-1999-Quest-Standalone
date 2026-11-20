@@ -32,21 +32,18 @@ static const unsigned char s_faces[6][4] = {
 
 /* centre: world Q12. axes: world unit vectors as COLUMNS (right, down, forward).
  * halfM: half the edge in meters. hot = the hand is in it (brighter). */
-void VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float halfM, int hot)
+/* Any see-through box: half sizes per axis (meters), colour and alpha
+ * (0..255). The VR melee hit volumes (vr_melee.c Show_Hitboxes) use it. */
+void VrBox_DrawEx(GsOT* ot, const VECTOR3* centre, const float axes[3][3], const float half[3],
+                  u8 r, u8 g, u8 b, int alpha)
 {
     MATRIX   ws, m;
     float    corner[8][3];
-    int      alpha, i, k, f;
-    u8       r, g, b;
+    int      i, k, f;
 
-    alpha = (int)lrintf(g_PcConfig.vrBoxOpacity * 2.55f);
-    if (hot) alpha = alpha * 2 + 40;
     if (alpha > 255) alpha = 255;
-    if (alpha <= 0 || halfM <= 0.0f)
+    if (alpha <= 0 || half[0] <= 0.0f || half[1] <= 0.0f || half[2] <= 0.0f)
         return;
-    r = hot ? 255 : 150;
-    g = hot ? 220 : 170;
-    b = hot ? 120 : 190;
 
     Vw_WorldScreenMatrixAtPositionGet(&ws, centre->vx, centre->vy, centre->vz);
 
@@ -56,9 +53,9 @@ void VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float h
         float off[3];
         for (i = 0; i < 3; i++)
         {
-            off[i] = axes[i][0] * ((k & 1) ? halfM : -halfM) +
-                     axes[i][1] * ((k & 2) ? halfM : -halfM) +
-                     axes[i][2] * ((k & 4) ? halfM : -halfM);
+            off[i] = axes[i][0] * ((k & 1) ? half[0] : -half[0]) +
+                     axes[i][1] * ((k & 2) ? half[1] : -half[1]) +
+                     axes[i][2] * ((k & 4) ? half[2] : -half[2]);
         }
         for (i = 0; i < 3; i++)
             corner[k][i] = (ws.m[i][0] * off[0] + ws.m[i][1] * off[1] + ws.m[i][2] * off[2]) / 4096.0f;
@@ -112,4 +109,12 @@ void VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float h
         addPrim(&ot->org[bucket], tp);
         GsOUT_PACKET_P = (PACKET*)(tp + 1);
     }
+}
+
+void VrBox_Draw(GsOT* ot, const VECTOR3* centre, const float axes[3][3], float halfM, int hot)
+{
+    const float half[3] = { halfM, halfM, halfM };
+    int         alpha   = (int)lrintf(g_PcConfig.vrBoxOpacity * 2.55f);
+    if (hot) alpha = alpha * 2 + 40;
+    VrBox_DrawEx(ot, centre, axes, half, hot ? 255 : 150, hot ? 220 : 170, hot ? 120 : 190, alpha);
 }

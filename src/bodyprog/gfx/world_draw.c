@@ -1396,6 +1396,8 @@ static void Pc_VrHolstersDraw(void)
         Pc_VrWeaponInBoxDraw(id, w, rot, t, edgeM * 256.0f, black);
     }
     Pc_VrWeaponWheelDraw();
+    /* Show_Hitboxes: the melee hit volumes (vr_melee.c) */
+    { extern void VrMelee_DebugDraw(GsOT* ot); VrMelee_DebugDraw(&g_OrderingTable0[g_ActiveBufferIdx]); }
 }
 #endif
 

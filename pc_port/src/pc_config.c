@@ -255,6 +255,7 @@ s_PcConfig g_PcConfig = {
     .vrWeaponSelect      = 0,      /* holsters */
     .vrBoxSize           = 16.0f,  /* cm */
     .vrTrainingDummy     = 0,
+    .vrShowHitboxes      = 0,
     .vrSawHitMs          = 500.0f,
     .vrDrillHitMs        = 600.0f,
     .vrBoxOpacity        = 30.0f,  /* % */
@@ -1403,6 +1404,10 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_weapon_select") == 0)
         {
             g_PcConfig.vrWeaponSelect = (atoi(value) == 1) ? 1 : 0;
+        }
+        else if (strcmp(key, "vr_show_hitboxes") == 0)
+        {
+            g_PcConfig.vrShowHitboxes = atoi(value) != 0;
         }
         else if (strcmp(key, "vr_training_dummy") == 0)
         {
