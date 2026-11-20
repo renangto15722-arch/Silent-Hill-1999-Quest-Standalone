@@ -629,6 +629,11 @@ static const s_PcOpt PCOPT_VH[] = {
     { "Wheel_Distance_cm", NULL, "vr_wwheel_dist",        NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelDist,     NULL, 0.0f, 40.0f, 1.0f },
     { "Wheel_Width_cm",    NULL, "vr_wwheel_width",       NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelWidth,    NULL, 15.0f, 60.0f, 1.0f },
     { "Wheel_Height_cm",   NULL, "vr_wwheel_height",      NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrWWheelHeight,   NULL, 10.0f, 50.0f, 1.0f },
+    /* vr_dummy.c: the first enemy that comes close freezes, cannot die, shows each hit */
+    { "Training_Dummy",    &g_PcConfig.vrTrainingDummy,    "vr_training_dummy",     VAL_ONOFF,     2, LBL_ONOFF,     NULL, 1, PCK_INT },
+    /* vr_melee.c: a motor weapon kept in an enemy cuts once per interval */
+    { "Chainsaw_Hit_Every_ms", NULL, "vr_saw_hit_ms",     NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrSawHitMs,       NULL, 100.0f, 1000.0f, 50.0f },
+    { "Drill_Hit_Every_ms",    NULL, "vr_drill_hit_ms",   NULL, 0, NULL, NULL, 1, PCK_SLIDER, &g_PcConfig.vrDrillHitMs,     NULL, 100.0f, 1000.0f, 50.0f },
     /* the last page: no Next */
     { "Prev_Page",         NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_PREV },
     { "Back",              NULL, NULL, NULL, 0, NULL, NULL, 0, PCK_BACK },

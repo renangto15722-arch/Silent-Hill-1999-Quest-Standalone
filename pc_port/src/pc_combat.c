@@ -738,6 +738,8 @@ void Pc_ExtraActionsUpdate(void)
     { extern void VrInteract_GameUpdate(void); VrInteract_GameUpdate(); }
     /* VR melee weapons hit by their own motion (vr_melee.c) */
     { extern void VrMelee_Update(void); VrMelee_Update(); }
+    /* the training dummy reads the hits the melee just landed (vr_dummy.c) */
+    { extern void VrDummy_Update(void); VrDummy_Update(); }
 
     if (!Pc_ActionSafe())
     {

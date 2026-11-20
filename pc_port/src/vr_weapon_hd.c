@@ -439,6 +439,60 @@ void VrWeaponHd_HandOccluder(int itemId, const MATRIX* plmWorld)
     VrHands_OccluderSet(0, pts, n);
 }
 
+/* The weapon's length axis in the held model's frame (PLM local, world Q8
+ * units, its VR_Objects Scale included) - what vr_melee.c strikes with: the
+ * unit direction from the hand bone (the grip) to the farthest point of the
+ * close-up model, and how far the model runs along it. 0 = the model is not
+ * loaded yet (it loads the first time the weapon is drawn in the hand). */
+int VrWeaponHd_LengthAxis(int itemId, float dir[3], float* len)
+{
+    const int         w = VrWeaponHd_Index(itemId);
+    const VrWeaponHd* h;
+    const s16*        verts;
+    float             lm[9], lt[3], best = 0.0f, u[3] = { 0.0f, 0.0f, 0.0f }, L = 0.0f;
+    double            k;
+    u32               i;
+    int               a, slot;
+
+    if (w < 0 || !s_hd[w].ready)
+        return 0;
+    h     = &s_hd[w];
+    slot  = PcConfig_GripSlot(itemId);
+    k     = ((slot >= 0) ? g_PcConfig.vrGripScale[slot] : 100.0f) / 100.0;
+    for (a = 0; a < 9; a++) lm[a] = (float)(h->em[a] * k);
+    for (a = 0; a < 3; a++) lt[a] = (float)(h->et[a] * k);
+    verts = (const s16*)h->tmd.vertop;
+
+    /* pass 1: the farthest vertex from the grip gives the direction */
+    for (i = 0; i < (u32)h->tmd.vern; i++)
+    {
+        const s16* v = verts + i * 4;
+        float      l[3], d2;
+        for (a = 0; a < 3; a++)
+            l[a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
+        d2 = l[0] * l[0] + l[1] * l[1] + l[2] * l[2];
+        if (d2 > best) { best = d2; u[0] = l[0]; u[1] = l[1]; u[2] = l[2]; }
+    }
+    if (best <= 1.0f)
+        return 0;
+    best = sqrtf(best);
+    for (a = 0; a < 3; a++) u[a] /= best;
+
+    /* pass 2: the model's extent along it (the tip, on the axis) */
+    for (i = 0; i < (u32)h->tmd.vern; i++)
+    {
+        const s16* v = verts + i * 4;
+        float      l[3], p;
+        for (a = 0; a < 3; a++)
+            l[a] = lm[a * 3 + 0] * v[0] + lm[a * 3 + 1] * v[1] + lm[a * 3 + 2] * v[2] + lt[a];
+        p = l[0] * u[0] + l[1] * u[1] + l[2] * u[2];
+        if (p > L) L = p;
+    }
+    for (a = 0; a < 3; a++) dir[a] = u[a];
+    *len = L;
+    return 1;
+}
+
 /* Test view (SH1VR_WPNHD_SHOW=<item id>, sim checks): that weapon's close-up
  * model half a metre in front of the camera, side-on, barrel to the right,
  * grip down - the whole model, with no hand in the way. */

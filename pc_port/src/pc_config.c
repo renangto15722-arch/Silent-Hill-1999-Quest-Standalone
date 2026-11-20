@@ -254,6 +254,9 @@ s_PcConfig g_PcConfig = {
     .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
     .vrWeaponSelect      = 0,      /* holsters */
     .vrBoxSize           = 16.0f,  /* cm */
+    .vrTrainingDummy     = 0,
+    .vrSawHitMs          = 300.0f,
+    .vrDrillHitMs        = 350.0f,
     .vrBoxOpacity        = 30.0f,  /* % */
     .vrWWheelDist        = 12.0f,  /* cm */
     .vrWWheelWidth       = 30.0f,  /* cm (1.3 : 1) */
@@ -1400,6 +1403,16 @@ void PcConfig_Load(const char* path)
         else if (strcmp(key, "vr_weapon_select") == 0)
         {
             g_PcConfig.vrWeaponSelect = (atoi(value) == 1) ? 1 : 0;
+        }
+        else if (strcmp(key, "vr_training_dummy") == 0)
+        {
+            g_PcConfig.vrTrainingDummy = atoi(value) != 0;
+        }
+        else if (strcmp(key, "vr_saw_hit_ms") == 0 || strcmp(key, "vr_drill_hit_ms") == 0)
+        {
+            float v = (float)atof(value);
+            v = (v < 100.0f) ? 100.0f : (v > 1000.0f) ? 1000.0f : v;
+            if (key[3] == 's') g_PcConfig.vrSawHitMs = v; else g_PcConfig.vrDrillHitMs = v;
         }
         else if (strcmp(key, "vr_hbox_size") == 0)
         {

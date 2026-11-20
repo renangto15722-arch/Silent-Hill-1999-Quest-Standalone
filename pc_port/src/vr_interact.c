@@ -426,6 +426,13 @@ int VrInteract_WeaponLive(void)
            VrInteract_HolsterState() != 1 && s_mapHand != VrInteract_WeaponHand();
 }
 
+/* The trigger of the hand holding the weapon is pulled (vr_melee.c: a motor
+ * weapon cuts only while it runs flat out). */
+int VrInteract_WeaponTriggerHeld(void)
+{
+    return VrInteract_WeaponLive() && s_fireDown;
+}
+
 /* A hand holds something - the drawn weapon or the map - so the VR hand is
  * drawn closed around it (vr_hands.c). */
 int VrInteract_HandHolds(int hand)
