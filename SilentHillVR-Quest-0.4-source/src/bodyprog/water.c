@@ -245,6 +245,14 @@ s32 func_8008D850(void) // 0x8008D850
         MATRIX m1;
         s32    deltaZ;
         s32    stepLen;
+        extern int VrTracking_HeadCamActive(void);
+        /* VR: the lens flare is a flat star/halo over the screen - in the
+         * headset it hangs in front of the eyes. Reported hidden (factor 0
+         * ramps it out); the water reflections are separate and stay. */
+        if (VrTracking_HeadCamActive())
+        {
+            return 0;
+        }
         Vw_WorldScreenMatrixAtPositionGet(&m0,
             g_WorldEnvWork.field_60.vx,
             g_WorldEnvWork.field_60.vy,

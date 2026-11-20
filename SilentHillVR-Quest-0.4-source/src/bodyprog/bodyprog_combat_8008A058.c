@@ -1445,6 +1445,15 @@ s32 func_8008B714(s_SubCharacter* attacker, s_SubCharacter* target, VECTOR3* arg
      * nothing", which is what the caller at ~2353 tests. */
     if (Pc_Pick_IsNoCollide(target))
         return 0;
+    /* Full VR: the melee and motor weapons hit only by the real swing of the
+     * weapon in the hand (vr_melee.c) - the game's own swing (trigger) lands
+     * nothing, or it would bypass the physical system */
+    if (attacker == &g_SysWork.playerWork.player && target != &g_SysWork.playerWork.player)
+    {
+        extern int VrMelee_BlocksGameHit(s32 weaponAttack);
+        if (VrMelee_BlocksGameHit((u8)attacker->field_44.field_2))
+            return 0;
+    }
 #endif
 
     weaponAttack = (u8)attacker->field_44.field_2;

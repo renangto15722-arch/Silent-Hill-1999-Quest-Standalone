@@ -1396,6 +1396,8 @@ static void Pc_VrHolstersDraw(void)
         Pc_VrWeaponInBoxDraw(id, w, rot, t, edgeM * 256.0f, black);
     }
     Pc_VrWeaponWheelDraw();
+    /* Show_Hitboxes: the melee hit volumes (vr_melee.c) */
+    { extern void VrMelee_DebugDraw(GsOT* ot); VrMelee_DebugDraw(&g_OrderingTable0[g_ActiveBufferIdx]); }
 }
 #endif
 
@@ -1414,6 +1416,11 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
          * 2 = held item, which also draws down to the close near plane */
         extern int g_PsyX_ActorVertexDepth;
         g_PsyX_ActorVertexDepth = 2;
+        /* VR melee (vr_melee.c): the hit volumes from the very matrix the
+         * weapon is drawn with this frame - computed before the frame's
+         * Harry and camera moves (pc_combat.c) they trailed the weapon by a
+         * frame while walking. Before the holsters: Show_Hitboxes draws there. */
+        { extern void VrMelee_Update(void); VrMelee_Update(); }
         Pc_VrHolstersDraw();
         { extern void Pc_MinimapVrSheetDraw(GsOT* ot); Pc_MinimapVrSheetDraw(&g_OrderingTable0[g_ActiveBufferIdx]); }
         g_PsyX_ActorVertexDepth = 0;
@@ -1490,6 +1497,21 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
                 coord = &s_inHand;
                 /* its shape for the VR hand's depth test (vr_hands.c) */
                 VrWeaponHd_HandOccluder(heldItem->itemId, &hm);
+            }
+            else
+            {
+                /* Full VR with no VR hand holding it this frame (a cutscene,
+                 * a scripted scene): the weapon would be drawn on Harry's
+                 * animated hand bone, a gun in his hand while the story
+                 * plays. In VR it only ever belongs in the player's hand, so
+                 * it is not drawn. Story props (the phone) still are; flat
+                 * play keeps the original. */
+                extern int VrOvr_IsReady(void);
+                extern int VrTracking_GetGameViewMode(void);
+                const int  id = heldItem->itemId;
+                if (id >= InvItemId_KitchenKnife && id <= InvItemId_HyperBlaster &&
+                    VrOvr_IsReady() && VrTracking_GetGameViewMode() == 2)
+                    return;
             }
         }
 #endif

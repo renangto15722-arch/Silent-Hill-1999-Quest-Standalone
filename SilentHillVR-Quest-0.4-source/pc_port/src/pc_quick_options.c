@@ -199,7 +199,7 @@ static const QoRowDef s_pageVrView[] = {
 };
 
 static const QoRowDef s_pageVrComfort[] = {
-    { ROW_OPT,   "vr_body_turn_deadzone",  0, NULL },
+    { ROW_OPT,   "vr_flashlight_head",     0, NULL },
     { ROW_OPT,   "vr_snap_turn",           0, NULL },
     { ROW_OPT,   "vr_ui_screen_size",      0, NULL },
     { ROW_OPT,   "vr_eye_res",             0, NULL },

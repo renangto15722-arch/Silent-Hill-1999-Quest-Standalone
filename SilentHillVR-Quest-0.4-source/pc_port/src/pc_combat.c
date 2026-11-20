@@ -736,8 +736,11 @@ void Pc_ExtraActionsUpdate(void)
 
     /* VR radial wheel pick (vr_interact.c), used once it is safe */
     { extern void VrInteract_GameUpdate(void); VrInteract_GameUpdate(); }
-    /* VR melee weapons hit by their own motion (vr_melee.c) */
-    { extern void VrMelee_Update(void); VrMelee_Update(); }
+    /* VR melee weapons hit by their own motion: vr_melee.c VrMelee_Update runs
+     * where the weapon is drawn (world_draw.c WorldGfx_HeldItemDraw), with the
+     * frame's final pose - from here it was a frame behind while walking */
+    /* the training dummy reads the hits the melee just landed (vr_dummy.c) */
+    { extern void VrDummy_Update(void); VrDummy_Update(); }
 
     if (!Pc_ActionSafe())
     {

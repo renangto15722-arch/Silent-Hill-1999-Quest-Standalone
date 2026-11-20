@@ -863,7 +863,22 @@ void Game_NpcUpdate(void) // 0x80038354
             else
 #endif
             {
+#ifdef SH_PC_PORT
+                /* training dummy being placed (vr_dummy.c): held on its spot
+                 * before and after its AI, so its pose is built there */
+                extern void VrDummy_Pin(void* npc, int slot);
+                VrDummy_Pin(npc, (int)(npc - g_SysWork.npcs));
+                /* Combat_Difficulty (vr_difficulty.c): a monster's tick on a
+                 * faster clock; nothing changes on Normal */
+                extern void VrDiff_NpcTickBegin(void* npc, int slot);
+                extern void VrDiff_NpcTickEnd(void);
+                VrDiff_NpcTickBegin(npc, (int)(npc - g_SysWork.npcs));
+#endif
                 g_MapOverlayHdr.charaUpdateFuncs[npc->model.charaId](npc, g_CharaModelAnimsData[animDataInfoIdx].activeAnmHdr, boneCoords);
+#ifdef SH_PC_PORT
+                VrDiff_NpcTickEnd();
+                VrDummy_Pin(npc, (int)(npc - g_SysWork.npcs));
+#endif
 #ifdef SH_PC_PORT
                 /* Randomizer enemy-HP scale: the AI update above sets an enemy's
                  * health on its first tick; latch + multiply once (no-op off). */

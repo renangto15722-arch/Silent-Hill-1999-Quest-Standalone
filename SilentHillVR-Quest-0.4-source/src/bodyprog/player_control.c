@@ -11269,6 +11269,29 @@ void Player_CombatUpdate(s_SubCharacter* player, GsCOORDINATE2* coord) // 0x8007
                 sp40.vx = Q8_TO_Q12(sp80.vx);
                 sp40.vy = Q8_TO_Q12(sp80.vy);
                 sp40.vz = Q8_TO_Q12(sp80.vz);
+#ifdef SH_PC_PORT
+                {
+                    /* VR: the swing streak runs along the weapon in the VR
+                     * hand (grip -> the blade point the sparks use), not
+                     * between Harry's animated hands */
+                    extern int VrIk_HeldPointQ8(const SVECTOR* local, VECTOR* outQ8);
+                    SVECTOR    l0 = { 0, 0, 0 }, l1;
+                    VECTOR     a, b;
+                    if (playerCombat.weaponAttack == WEAPON_ATTACK(EquippedWeaponId_Chainsaw, AttackInputType_Tap))
+                    {
+                        Math_SetSVectorFast(&l1, 2, 20, 57);
+                    }
+                    else
+                    {
+                        Math_SetSVectorFast(&l1, 2, 24, 67);
+                    }
+                    if (VrIk_HeldPointQ8(&l0, &a) && VrIk_HeldPointQ8(&l1, &b))
+                    {
+                        sp30.vx = Q8_TO_Q12(a.vx); sp30.vy = Q8_TO_Q12(a.vy); sp30.vz = Q8_TO_Q12(a.vz);
+                        sp40.vx = Q8_TO_Q12(b.vx); sp40.vy = Q8_TO_Q12(b.vy); sp40.vz = Q8_TO_Q12(b.vz);
+                    }
+                }
+#endif
                 g_MapOverlayHdr.particleBeamDraw(&sp30, &sp40);
             }
         }

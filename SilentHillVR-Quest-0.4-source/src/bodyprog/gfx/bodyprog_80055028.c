@@ -522,7 +522,11 @@ void Gfx_2dEffectsDraw(void) // 0x800550D0
          * blown-out highlights, so skip it entirely like the pre-calibration
          * builds did. */
         extern int g_PsyX_FlashlightActive, g_PsyX_FlashlightStyle;
-        if (!(g_PsyX_FlashlightActive && g_PsyX_FlashlightStyle == 0))
+        /* VR: this glow is a flat 2D overlay laid over the screen around the
+         * light's projected point - in the headset it hangs in front of the
+         * eyes instead of lighting the room, so it is left out there. */
+        extern int VrTracking_HeadCamActive(void);
+        if (!(g_PsyX_FlashlightActive && g_PsyX_FlashlightStyle == 0) && !VrTracking_HeadCamActive())
 #endif
         func_80041074(ot, g_WorldEnvWork.field_54, &g_WorldEnvWork.field_58, &g_WorldEnvWork.field_60);
     }
@@ -817,6 +821,25 @@ void func_800554C4(s32 arg0, s16 arg1, GsCOORDINATE2* coord0, GsCOORDINATE2* coo
             g_WorldEnvWork.field_58.vy = g_PcFpsViewFwd.vy;
             g_WorldEnvWork.field_58.vz = g_PcFpsViewFwd.vz;
             g_WorldEnvWork.field_60    = g_PcFpsEyePos;
+
+            /* VR Flashlight_Follows_Headset: the beam along the headset's
+             * forward, from the headset - the view VrApplyHeadOffset last
+             * built (camera->world rotation, column 2 = forward; t in Q8) */
+            {
+                extern int VrTracking_HeadCamActive(void);
+                extern int VrTracking_GetCameraMatrix(MATRIX* out);
+                MATRIX     cam;
+                if (g_PcConfig.vrFlashlightHead && VrTracking_HeadCamActive() &&
+                    VrTracking_GetCameraMatrix(&cam))
+                {
+                    g_WorldEnvWork.field_58.vx = cam.m[0][2];
+                    g_WorldEnvWork.field_58.vy = cam.m[1][2];
+                    g_WorldEnvWork.field_58.vz = cam.m[2][2];
+                    g_WorldEnvWork.field_60.vx = Q8_TO_Q12(cam.t[0]);
+                    g_WorldEnvWork.field_60.vy = Q8_TO_Q12(cam.t[1]);
+                    g_WorldEnvWork.field_60.vz = Q8_TO_Q12(cam.t[2]);
+                }
+            }
         }
     }
 #endif

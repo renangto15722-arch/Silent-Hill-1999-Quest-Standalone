@@ -323,6 +323,26 @@ static void VrReadBridge(void)
 
     s_newSample = 0;
 
+    /* The system recenter (Quest button held): the space changed under us.
+     * A few frames later - the poses are then in the new space - take the
+     * origin again and let the body height be measured again, or the head
+     * height kept from the old space put the view near the floor (or in the
+     * air) for the rest of the session. */
+    {
+        extern int  VrXr_TakeSpaceChanged(void);
+        extern void VrIk_ResetBodyMeasure(void);
+        extern void VrOvr_Log(const char* fmt, ...);
+        static int  s_recenterIn = 0;
+        if (VrXr_TakeSpaceChanged())
+            s_recenterIn = 10;
+        if (s_recenterIn > 0 && --s_recenterIn == 0)
+        {
+            s_haveOrigin = 0;          /* the next head sample recenters */
+            VrIk_ResetBodyMeasure();
+            VrOvr_Log("[VR] system recenter: origin and body height taken again\n");
+        }
+    }
+
     /* Try native poses first - every frame: the pose was polled for exactly
      * this frame (VrOvr_PollPoseForNextFrame). The read interval below used to
      * gate this too, on a whole-millisecond clock, so a frame starting under
@@ -480,7 +500,23 @@ int VrTracking_GetUiContext(void)
              * treated as world it was blown up over the whole field of view. */
             extern s32 g_Pc2dBackgroundActive;
             extern int g_PsxPresentLastFrame;
+            /* An event that swaps one full-screen image for another (the
+             * piano: PIANO1 -> fade -> load PIANO2) draws no image while the
+             * next one loads. Those few frames read as world: the frozen
+             * world was re-captured from the black transition frame (piano
+             * all black in Full VR), or the view fell to the plain 2D
+             * screen, depending on the load time. Hold the screen context
+             * through such a gap; a scripted 3D scene that follows starts
+             * behind the event's own fade from black. */
+            static Uint32 s_bg2dSeenAt = 0;
             if (g_SysWork.sysState != SysState_Gameplay && g_Pc2dBackgroundActive > 0)
+            {
+                s_bg2dSeenAt = SDL_GetTicks();
+                return 1;
+            }
+            if (g_SysWork.sysState == SysState_Gameplay)
+                s_bg2dSeenAt = 0;
+            else if (s_bg2dSeenAt != 0 && SDL_GetTicks() - s_bg2dSeenAt < 1000)
                 return 1;
             /* Scripted paper-map scenes (a new objective: the map zooms in,
              * arrow, "Cheryl" - map2_s00 / map1_s06 via Event_PaperMapCmd)
@@ -742,7 +778,7 @@ int VrTracking_HeadCamActive(void)
     return g_PcConfig.vrEnabled && VrOvr_IsReady();
 }
 
-/* ---- BODY FOLLOWS THE HEAD (Body_Turning_Deadzone) ------------------------
+/* ---- BODY FOLLOWS THE HEAD (fixed deadzone) ----------------------------
  * The view yaw is the body's base yaw (g_TpsCamYaw, which the FPS body snaps
  * to in player_control.c) plus the head yaw relative to it:
  *     rel = wrap(SIGN_YAW * (head - origin) - s_bodyYawXfer)
@@ -762,6 +798,9 @@ int VrTracking_HeadCamActive(void)
  * context) never turn the body.
  * Returns the turn for this frame as a Q12 angle (4096 = 360 deg). */
 #define VR_BODY_TURN_RATE 6.0f   /* 1/s: ~0.17 s time constant on the excess */
+/* deg each side; was the Body_Turning_Deadzone option (removed 20/11/2026 at
+ * Renan's request), fixed at the value his and the shipped Quest config used */
+#define VR_BODY_TURN_DEADZONE_DEG 12.0f
 
 int VrTracking_TakeBodyTurn(void)
 {
@@ -782,7 +821,7 @@ int VrTracking_TakeBodyTurn(void)
     while (rel >  3.14159265f) rel -= 6.28318531f;
     while (rel < -3.14159265f) rel += 6.28318531f;
 
-    dz = g_PcConfig.vrBodyTurnDeadzone * (3.14159265f / 180.0f);
+    dz = VR_BODY_TURN_DEADZONE_DEG * (3.14159265f / 180.0f);
     if (rel > dz)       excess = rel - dz;
     else if (rel < -dz) excess = rel + dz;
     else                return 0;
@@ -805,7 +844,7 @@ int VrTracking_TakeBodyTurn(void)
 /* Walk_Direction = Head (vr_move_dir 1): the stick walks along the headset's
  * yaw, not the body's. Returned as the head's yaw relative to the body (the
  * rel above, Q12 angle), which player_control.c adds to the movement heading
- * offset - the body still follows the head through Body_Turning_Deadzone.
+ * offset - the body still follows the head past the fixed deadzone.
  * 0 with Body, or when the head does not drive the view (cutscene, menus). */
 int VrTracking_MoveYawOffset(void)
 {

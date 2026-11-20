@@ -380,7 +380,6 @@ typedef struct {
     float vrScreenWidth;    /* cinema/floating screen width in meters, 0.5..8 (vr_screen_width) */
     float vrScreenDistance; /* cinema/floating screen distance in meters, 0.5..10 (vr_screen_distance) */
     float vrFovRollCover;   /* Full VR: head roll (deg) the widened fov still covers, 0..30 (vr_fov_roll_cover) */
-    float vrBodyTurnDeadzone; /* VR: head yaw (deg) each side before the body turns to follow, 0..90 (vr_body_turn_deadzone) */
     int   vrSnapTurn;       /* VR: right-stick snap turn in degrees, 0 = smooth turning, else 15..90 in 15s (vr_snap_turn) */
     float vrUiScreenSize;   /* Full VR: 2D interface panel size in %, 100 = 60 deg wide, 50..150 (vr_ui_screen_size) */
     float vrHeadsetRes;     /* OpenXR eye swapchain size, % of the runtime's recommended size, 100..150 (vr_headset_res); read at VR start */
@@ -398,9 +397,16 @@ typedef struct {
     float vrGunAim[12][5];  /* VR: each gun's own aim, added to vr_aim_*: muzzle forward, up, right (cm), pitch, yaw (deg) (values 8-12 of vr_grip_<id>; vr_ik.c VrIk_GetGunRay) */
     float vrMapScale;       /* VR: the paper map's size in the hand, %, 50..300, default 150 (vr_map_scale; vr_ik.c) */
     int   vrMoveDir;        /* VR: the stick walks along 0 = the body, 1 = the headset's yaw (vr_move_dir; vr_tracking.c VrTracking_MoveYawOffset) */
+    int   vrFlashlightHead; /* VR: the flashlight points where 0 = the body/view faces, 1 = the headset looks (vr_flashlight_head; bodyprog_80055028.c func_800554C4) */
     int   vrHolsterOn;      /* VR: weapon holsters on the body (vr_holster) */
     int   vrHolsterSlot[6]; /* VR: weapon in each holster, 0 = none, else PcConfig_HolsterWeapon index: hip L/R, chest L/R, back L/R (vr_holster_*) */
     int   vrWeaponSelect;   /* VR: how weapons are taken: 0 = holsters on the body, 1 = weapon wheel on the right grip (vr_weapon_select) */
+    int   vrTrainingDummy;  /* VR: the first enemy that comes close is frozen, cannot die and shows each hit's damage (vr_training_dummy) */
+    int   vrShowHitboxes;   /* VR: draw the melee weapon's hit spheres / box and the enemies' bodies (vr_show_hitboxes) */
+    int   vrDifficulty;     /* VR combat difficulty: 0 Normal (vanilla), 1 Hard, 2 Silent Hell (vr_difficulty) */
+    float vrMeleeCooldownMs; /* VR: melee weapons - no damage this soon after the last damaging hit, ms (vr_melee_cooldown_ms) */
+    float vrSawHitMs;       /* VR: chainsaw - time between two cuts while it stays in an enemy, ms (vr_saw_hit_ms) */
+    float vrDrillHitMs;     /* VR: rock drill - the same, ms (vr_drill_hit_ms) */
     float vrBoxSize;        /* VR: edge of the visible grab box of a holster / wheel slot, cm, 8..30 (vr_hbox_size) */
     float vrBoxOpacity;     /* VR: that box's opacity, %, 0..100 (vr_hbox_opacity) */
     float vrWWheelDist;     /* VR: weapon wheel centre ahead of the right controller, cm, 0..40 (vr_wwheel_dist) */

@@ -210,7 +210,6 @@ s_PcConfig g_PcConfig = {
     .vrScreenWidth       = 1.6f,   /* ~44 deg wide at 2 m */
     .vrScreenDistance    = 2.0f,
     .vrFovRollCover      = 10.0f,
-    .vrBodyTurnDeadzone  = 15.0f,
     .vrSnapTurn          = 0,      /* smooth turning */
     .vrUiScreenSize      = 100.0f, /* 60 deg wide 2D interface panel */
     .vrHeadsetRes        = 100.0f, /* runtime's recommended eye size */
@@ -249,11 +248,18 @@ s_PcConfig g_PcConfig = {
     .vrGunSight          = 2,      /* laser beam + dot on every gun */
     .vrMapScale          = 150.0f, /* Quest: the paper map 1.5x (45 x 34 cm), readable at the headset's resolution */
     .vrMoveDir           = 0,      /* walk where the body faces */
+    .vrFlashlightHead    = 0,      /* flashlight along the body/view, as before */
     .vrHeadLock          = 0,
     .vrHolsterOn         = 1,
     .vrHolsterSlot       = { 1, 8, 0, 0, 2, 10 },   /* knife | handgun, -, pipe | shotgun */
     .vrWeaponSelect      = 0,      /* holsters */
     .vrBoxSize           = 16.0f,  /* cm */
+    .vrTrainingDummy     = 0,
+    .vrShowHitboxes      = 0,
+    .vrDifficulty        = 0,
+    .vrMeleeCooldownMs   = 500.0f,
+    .vrSawHitMs          = 500.0f,
+    .vrDrillHitMs        = 600.0f,
     .vrBoxOpacity        = 30.0f,  /* % */
     .vrWWheelDist        = 12.0f,  /* cm */
     .vrWWheelWidth       = 30.0f,  /* cm (1.3 : 1) */
@@ -1401,6 +1407,30 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.vrWeaponSelect = (atoi(value) == 1) ? 1 : 0;
         }
+        else if (strcmp(key, "vr_show_hitboxes") == 0)
+        {
+            g_PcConfig.vrShowHitboxes = atoi(value) != 0;
+        }
+        else if (strcmp(key, "vr_training_dummy") == 0)
+        {
+            g_PcConfig.vrTrainingDummy = atoi(value) != 0;
+        }
+        else if (strcmp(key, "vr_difficulty") == 0)
+        {
+            int v = atoi(value);
+            g_PcConfig.vrDifficulty = (v < 0 || v > 2) ? 0 : v;
+        }
+        else if (strcmp(key, "vr_melee_cooldown_ms") == 0)
+        {
+            float v = (float)atof(value);
+            g_PcConfig.vrMeleeCooldownMs = (v < 0.0f) ? 0.0f : (v > 2000.0f) ? 2000.0f : v;
+        }
+        else if (strcmp(key, "vr_saw_hit_ms") == 0 || strcmp(key, "vr_drill_hit_ms") == 0)
+        {
+            float v = (float)atof(value);
+            v = (v < 100.0f) ? 100.0f : (v > 1000.0f) ? 1000.0f : v;
+            if (key[3] == 's') g_PcConfig.vrSawHitMs = v; else g_PcConfig.vrDrillHitMs = v;
+        }
         else if (strcmp(key, "vr_hbox_size") == 0)
         {
             float v = (float)atof(value);
@@ -1495,6 +1525,10 @@ void PcConfig_Load(const char* path)
         {
             g_PcConfig.vrMoveDir = (atoi(value) != 0);
         }
+        else if (strcmp(key, "vr_flashlight_head") == 0)
+        {
+            g_PcConfig.vrFlashlightHead = (atoi(value) != 0);
+        }
         else if (strcmp(key, "vr_map_scale") == 0)
         {
             float v = (float)atof(value);
@@ -1544,11 +1578,6 @@ void PcConfig_Load(const char* path)
             /* 0 (smooth) or a multiple of 15 up to 90 */
             int v = (atoi(value) + 7) / 15 * 15;
             g_PcConfig.vrSnapTurn = (v < 0) ? 0 : (v > 90) ? 90 : v;
-        }
-        else if (strcmp(key, "vr_body_turn_deadzone") == 0)
-        {
-            float v = (float)atof(value);
-            g_PcConfig.vrBodyTurnDeadzone = (v < 0.0f) ? 0.0f : (v > 90.0f) ? 90.0f : v;
         }
         else if (strcmp(key, "vr_headset_preset") == 0)
         {
