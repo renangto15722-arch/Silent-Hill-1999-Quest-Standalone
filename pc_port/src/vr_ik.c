@@ -1643,6 +1643,14 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
                 if (line[0]) Pc_ConsoleExec(line);
                 e = semi ? semi + 1 : NULL;
             }
+            /* SH1VR_EVENT=<index into mapEvents> (test runs): fire that
+             * button event once, as a hand grab would (events_main.c) */
+            e = getenv("SH1VR_EVENT");
+            if (e && e[0])
+            {
+                extern s32 g_PcVrGrabEvent;
+                g_PcVrGrabEvent = atoi(e);
+            }
             /* SH1VR_TP="x,z" (meters): put Harry there */
             e = getenv("SH1VR_TP");
             if (e && e[0])

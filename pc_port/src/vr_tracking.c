@@ -480,7 +480,23 @@ int VrTracking_GetUiContext(void)
              * treated as world it was blown up over the whole field of view. */
             extern s32 g_Pc2dBackgroundActive;
             extern int g_PsxPresentLastFrame;
+            /* An event that swaps one full-screen image for another (the
+             * piano: PIANO1 -> fade -> load PIANO2) draws no image while the
+             * next one loads. Those few frames read as world: the frozen
+             * world was re-captured from the black transition frame (piano
+             * all black in Full VR), or the view fell to the plain 2D
+             * screen, depending on the load time. Hold the screen context
+             * through such a gap; a scripted 3D scene that follows starts
+             * behind the event's own fade from black. */
+            static Uint32 s_bg2dSeenAt = 0;
             if (g_SysWork.sysState != SysState_Gameplay && g_Pc2dBackgroundActive > 0)
+            {
+                s_bg2dSeenAt = SDL_GetTicks();
+                return 1;
+            }
+            if (g_SysWork.sysState == SysState_Gameplay)
+                s_bg2dSeenAt = 0;
+            else if (s_bg2dSeenAt != 0 && SDL_GetTicks() - s_bg2dSeenAt < 1000)
                 return 1;
             /* Scripted paper-map scenes (a new objective: the map zooms in,
              * arrow, "Cheryl" - map2_s00 / map1_s06 via Event_PaperMapCmd)
