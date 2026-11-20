@@ -708,8 +708,36 @@ const s_PcOpt* PcOpt_PageByIndex(int page, int* count)
     return PCOPT_PAGES[page].tbl;
 }
 
+/* VR_Holsters as the menu shows it: only the rows of the chosen Weapon_Select
+ * mode - the holster slots and their forward offset with Holsters, the wheel
+ * size with Weapon_Wheel; the boxes and the grab reach serve both. The full
+ * table (PcOpt_PageByIndex) still backs the quick menu lookup and the reset
+ * to defaults, so a hidden row keeps its value and is still reset. */
+#define PCOPT_PAGE_VRHOLSTER 10
+static s_PcOpt s_vrHolsterRows[(int)(sizeof(PCOPT_VH) / sizeof(PCOPT_VH[0]))];
+static int PcOpt_VrHolstersBuild(void)
+{
+    const int wheel = (g_PcConfig.vrWeaponSelect == 1);
+    int       i, n = 0;
+    for (i = 0; i < (int)(sizeof(PCOPT_VH) / sizeof(PCOPT_VH[0])); i++)
+    {
+        const char* k = PCOPT_VH[i].key;
+        const int   holsterOnly = k != NULL && (strncmp(k, "vr_holster_", 11) == 0 || strcmp(k, "vr_hbox_fwd") == 0);
+        const int   wheelOnly   = k != NULL && strncmp(k, "vr_wwheel_", 10) == 0;
+        if ((wheel && holsterOnly) || (!wheel && wheelOnly))
+            continue;
+        s_vrHolsterRows[n++] = PCOPT_VH[i];
+    }
+    return n;
+}
+
 static const s_PcOpt* PcOpt_Page(int* count)
 {
+    if (g_PcOptionsMenu_Page == PCOPT_PAGE_VRHOLSTER)
+    {
+        *count = PcOpt_VrHolstersBuild();
+        return s_vrHolsterRows;
+    }
     return PcOpt_PageByIndex(g_PcOptionsMenu_Page, count);
 }
 
