@@ -1548,6 +1548,25 @@ int VrIk_HeldItemMatrix(MATRIX* out)
     return 1;
 }
 
+/* A point given in the held weapon's own model frame (Harry's right hand
+ * bone, PSX Q8 units - the offsets the effect code feeds the GTE) carried by
+ * the VR weapon in the hand: world Q8. 0 = no VR hands this frame (the caller
+ * keeps the hand-bone result). Chainsaw / rock drill sparks and streak. */
+int VrIk_HeldPointQ8(const SVECTOR* local, VECTOR* outQ8)
+{
+    MATRIX hm;
+    int    i;
+    if (!VrIk_HeldItemMatrix(&hm))
+        return 0;
+    for (i = 0; i < 3; i++)
+    {
+        const long long v = (long long)hm.m[i][0] * local->vx + (long long)hm.m[i][1] * local->vy +
+                            (long long)hm.m[i][2] * local->vz;
+        (&outQ8->vx)[i] = (s32)(v / 4096) + hm.t[i];
+    }
+    return 1;
+}
+
 /* Player_Update tail (player_control.c). */
 void VrIk_ApplyArms(GsCOORDINATE2* coords)
 {
@@ -1626,6 +1645,22 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
         /* SH1VR_EXEC (test runs, K:\sh1vr\xrsim64): one console line, once, at the
          * first frame of play - e.g. "give allweapons" for the holster tests */
         static int s_execDone = 0;
+        {
+            /* SH1VR_EQUIP=<inventory item id> (test runs): switch to that
+             * owned weapon as the VR weapon wheel does (pc_combat.c), retried
+             * each frame until the game takes it (a few seconds at most) */
+            static int s_equipTries = 0;
+            const char* q = getenv("SH1VR_EQUIP");
+            if (q && q[0] && s_equipTries < 600 &&
+                (int)g_SavegamePtr->equippedWeapon != atoi(q))
+            {
+                extern int Pc_VrWheelUse(u8 id);
+                s_equipTries++;
+                Pc_VrWheelUse((u8)atoi(q));
+                if ((int)g_SavegamePtr->equippedWeapon == atoi(q))
+                    VrOvr_Log("[VR-IK] test equip %s after %d tries\n", q, s_equipTries);
+            }
+        }
         if (!s_execDone)
         {
             extern void Pc_ConsoleExec(const char* line);
@@ -1643,6 +1678,8 @@ void VrIk_ApplyArms(GsCOORDINATE2* coords)
                 if (line[0]) Pc_ConsoleExec(line);
                 e = semi ? semi + 1 : NULL;
             }
+            /* SH1VR_EQUIP=<inventory item id> (test runs): switch to that
+             * owned weapon, as the VR weapon wheel does (pc_combat.c) */
             /* SH1VR_EVENT=<index into mapEvents> (test runs): fire that
              * button event once, as a hand grab would (events_main.c) */
             e = getenv("SH1VR_EVENT");

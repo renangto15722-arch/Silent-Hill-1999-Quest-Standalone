@@ -2449,6 +2449,14 @@ void func_8006342C(s32 weaponAttack, q3_12 rotY, q3_12 rotX, GsCOORDINATE2* coor
     {
         Pc_VrMuzzleQ8(&ptr->field_28);
     }
+    else if (weaponAttack == WEAPON_ATTACK(EquippedWeaponId_Chainsaw, AttackInputType_Tap) ||
+             weaponAttack == WEAPON_ATTACK(EquippedWeaponId_RockDrill, AttackInputType_Tap))
+    {
+        /* the blade's sparks / exhaust: the same model-frame point, on the
+         * VR weapon in the hand */
+        extern int VrIk_HeldPointQ8(const SVECTOR* local, VECTOR* outQ8);
+        VrIk_HeldPointQ8(&ptr->field_20, &ptr->field_28);
+    }
 #endif
 
     switch (weaponAttack)
