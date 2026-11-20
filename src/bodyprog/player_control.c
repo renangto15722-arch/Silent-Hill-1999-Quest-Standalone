@@ -10474,7 +10474,7 @@ void Player_ReceiveDamage(s_SubCharacter* player, s_PlayerExtra* extra) // 0x800
             }
 
 #ifdef SH_PC_PORT
-            /* Combat_Difficulty (vr_difficulty.c): Hard 1.5x, Hell 2x; Normal as is */
+            /* Combat_Difficulty (vr_difficulty.c): Hard 1.5x, Silent Hell 2x; Normal as is */
             {
                 extern q19_12 VrDiff_PlayerDamage(q19_12 amount);
                 player->damage.amount = VrDiff_PlayerDamage(player->damage.amount);

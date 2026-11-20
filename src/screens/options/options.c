@@ -202,7 +202,7 @@ static const char* const LBL_FILT[]  = { "Off", "Dither", "Bilinear", "Trilinear
                                          "Aniso_2x", "Aniso_4x", "Aniso_8x", "Aniso_16x" };
 static const char* const LBL_ONOFF[] = { "Off", "On" };
 static const int         VAL_VRDIFF[] = { 0, 1, 2 };
-static const char* const LBL_VRDIFF[] = { "Normal", "Hard", "Hell_on_Earth" };
+static const char* const LBL_VRDIFF[] = { "Normal", "Hard", "Silent_Hell" };
 static const char* const LBL_AA[]    = { "Off", "2x", "4x", "8x" };
 static const char* const LBL_POST[]  = { "Off", "CRT", "Scanlines", "Vignette", "Color_Grade", "Film_Grain", "Sharpen", "PSX_Retro", "Cinematic" };
 static const char* const LBL_TONE[]  = { "Off", "Reinhard", "ACES", "Filmic" };

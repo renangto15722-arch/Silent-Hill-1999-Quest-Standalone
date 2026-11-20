@@ -1,12 +1,12 @@
 /*
 =============================================================================
- SH1 PC Port - COMBAT DIFFICULTY (VR): Normal / Hard / Hell on Earth
+ SH1 PC Port - COMBAT DIFFICULTY (VR): Normal / Hard / Silent Hell
 =============================================================================
 
  Combat_Difficulty (vr_difficulty, VR_Holsters page), live - to balance the
  stronger VR melee. Stacks on the game's own Easy/Normal/Hard.
 
-                       Normal   Hard   Hell on Earth
+                       Normal   Hard   Silent Hell
    enemy speed          1.0x    1.2x      1.4x
    enemy damage         1.0x    1.5x      2.0x
    hit recovery         1.0x    0.7x      0.4x   (time an enemy takes to recover)
@@ -22,7 +22,7 @@
  RECOVERY: for VR_DIFF_STAGGER_MS after a hit lands on a monster, its clock
  runs a further 1 / recovery faster, so the hit reaction (stagger, knockdown)
  is over in recovery x its time and it cannot be kept stunned by chaining
- hits. Hell: 1.4 / 0.4 = 3.5x during that window.
+ hits. Silent Hell: 1.4 / 0.4 = 3.5x during that window.
  AGGRESSIVENESS: SH1 has no aggression value - every monster's behaviour is
  its own state machine. The faster clock is what makes them more aggressive:
  shorter waits between attacks, earlier attacks, less time to react.
