@@ -1498,6 +1498,21 @@ void WorldGfx_HeldItemDraw(void) // 0x8003D058
                 /* its shape for the VR hand's depth test (vr_hands.c) */
                 VrWeaponHd_HandOccluder(heldItem->itemId, &hm);
             }
+            else
+            {
+                /* Full VR with no VR hand holding it this frame (a cutscene,
+                 * a scripted scene): the weapon would be drawn on Harry's
+                 * animated hand bone, a gun in his hand while the story
+                 * plays. In VR it only ever belongs in the player's hand, so
+                 * it is not drawn. Story props (the phone) still are; flat
+                 * play keeps the original. */
+                extern int VrOvr_IsReady(void);
+                extern int VrTracking_GetGameViewMode(void);
+                const int  id = heldItem->itemId;
+                if (id >= InvItemId_KitchenKnife && id <= InvItemId_HyperBlaster &&
+                    VrOvr_IsReady() && VrTracking_GetGameViewMode() == 2)
+                    return;
+            }
         }
 #endif
 #ifdef SH_PC_PORT
